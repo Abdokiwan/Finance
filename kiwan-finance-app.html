@@ -284,6 +284,58 @@
     *{animation-duration:.001s!important;animation-iteration-count:1!important;}
   }
 
+  /* ========== LOGIN WALL ========== */
+  #loginWall{
+    position:fixed;inset:0;z-index:1000;
+    background:#0b0d0f;
+    display:flex;align-items:center;justify-content:center;
+    padding:24px;
+  }
+  #loginWall::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(600px 360px at 78% 8%, rgba(61,214,106,.10), transparent 60%),
+      radial-gradient(520px 320px at 12% 96%, rgba(111,168,220,.08), transparent 55%);
+  }
+  .lw-box{
+    position:relative;z-index:1;
+    width:100%;max-width:380px;
+    background:var(--card);border:1px solid var(--line);border-radius:24px;
+    padding:32px 28px;
+    animation:rise .5s cubic-bezier(.2,.8,.2,1);
+  }
+  .lw-logo{
+    display:flex;align-items:center;gap:9px;
+    font-size:11px;letter-spacing:4px;text-transform:uppercase;
+    color:#7fd99a;font-weight:700;margin-bottom:20px;
+  }
+  .lw-logo::before{
+    content:"";width:7px;height:7px;border-radius:50%;
+    background:var(--green);box-shadow:0 0 10px var(--green);
+    animation:beat 1.8s ease-in-out infinite;
+  }
+  .lw-title{font-size:26px;font-weight:800;letter-spacing:-1px;margin-bottom:6px;}
+  .lw-sub{color:var(--muted);font-size:13px;margin-bottom:28px;line-height:1.6;}
+  .lw-field{margin-bottom:14px;}
+  .lw-label{display:block;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
+  .lw-input{
+    width:100%;background:var(--bg);border:1px solid var(--line);border-radius:13px;
+    padding:14px 16px;color:var(--txt);font-family:var(--mono);font-size:15px;outline:none;
+    transition:border-color .2s,box-shadow .2s;
+  }
+  .lw-input:focus{border-color:rgba(61,214,106,.5);box-shadow:0 0 0 3px rgba(61,214,106,.08);}
+  .lw-btn{
+    width:100%;border:none;border-radius:14px;padding:16px;margin-top:6px;
+    background:linear-gradient(135deg,#3DD66A,#2ea854);
+    color:#04140a;font-family:var(--mono);font-size:16px;font-weight:800;
+    cursor:pointer;
+    box-shadow:0 10px 28px -8px rgba(61,214,106,.5);
+    transition:transform .15s,box-shadow .15s;
+  }
+  .lw-btn:active{transform:scale(.97);}
+  .lw-err{color:var(--red);font-size:13px;text-align:center;margin-top:12px;min-height:18px;}
+  .lw-hide{display:none!important;}
+
   /* ---------- TOP ICONS (mic + history) ---------- */
   .top-icons{position:absolute;top:0;right:0;z-index:20;display:flex;gap:8px;}
   .top-ic{width:38px;height:38px;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -540,6 +592,51 @@
 </style>
 </head>
 <body>
+<!-- ===== LOGIN WALL ===== -->
+<div id="loginWall">
+  <div class="lw-box">
+    <div class="lw-logo">Finance Tracker</div>
+
+    <!-- SETUP FORM (first time only) -->
+    <div id="lwSetup">
+      <div class="lw-title">Create your password</div>
+      <div class="lw-sub">Set your private credentials once — only you can access this app.</div>
+      <div class="lw-field">
+        <label class="lw-label">Your Email</label>
+        <input id="su-email" class="lw-input" type="email" placeholder="you@example.com" autocomplete="email" />
+      </div>
+      <div class="lw-field">
+        <label class="lw-label">Password</label>
+        <input id="su-pass" class="lw-input" type="password" placeholder="Choose a strong password (8+ chars)" autocomplete="new-password" />
+      </div>
+      <div class="lw-field">
+        <label class="lw-label">Confirm Password</label>
+        <input id="su-pass2" class="lw-input" type="password" placeholder="Repeat your password" autocomplete="new-password"
+               onkeydown="if(event.key==='Enter')doSetup()" />
+      </div>
+      <button class="lw-btn" onclick="doSetup()">Create Password →</button>
+      <div class="lw-err" id="su-err"></div>
+    </div>
+
+    <!-- LOGIN FORM (returning user) -->
+    <div id="lwLogin" class="lw-hide">
+      <div class="lw-title">Welcome back<span style="color:var(--green)">.</span></div>
+      <div class="lw-sub">Sign in to access your finances.</div>
+      <div class="lw-field">
+        <label class="lw-label">Email</label>
+        <input id="li-email" class="lw-input" type="email" placeholder="you@example.com" autocomplete="email" />
+      </div>
+      <div class="lw-field">
+        <label class="lw-label">Password</label>
+        <input id="li-pass" class="lw-input" type="password" placeholder="Your password"
+               autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" />
+      </div>
+      <button class="lw-btn" onclick="doLogin()">Sign In →</button>
+      <div class="lw-err" id="li-err"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ===== SPLASH INTRO ===== -->
 <div id="splash">
   <div class="splash-glow"></div>
@@ -841,18 +938,18 @@ function setBal(id, val){
 loadBalances();
 loadMemory();
 
-// cinematic splash → reveal
-(function(){
+// cinematic splash → reveal (called by login wall after auth)
+function startSplash(){
   var splash=document.getElementById('splash');
   var app=document.getElementById('app');
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if(reduce){ if(splash) splash.style.display='none'; if(app) app.classList.add('reveal'); return; }
   setTimeout(function(){
-    if(app) app.classList.add('reveal');   // zoom-in
-    if(splash) splash.classList.add('hide'); // fade+scale out
+    if(app) app.classList.add('reveal');
+    if(splash) splash.classList.add('hide');
     setTimeout(function(){ if(splash) splash.style.display='none'; }, 750);
-  }, 1100); // splash shows ~1.1s
-})();
+  }, 1100);
+}
 
 /* ============ AI ASK (JSONP) ============ */
 function openChat(){
@@ -1695,6 +1792,86 @@ function escapeHtml(s){ return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&
 let toastT;
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),3200); }
+
+/* ========== LOGIN WALL ========== */
+(function(){
+  var STORE_KEY = '_fauth_v1';
+
+  function sha256(str){
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str))
+      .then(function(buf){
+        return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+      });
+  }
+
+  function getStored(){
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)||'null'); } catch(e){ return null; }
+  }
+
+  var stored = getStored();
+  var wall    = document.getElementById('loginWall');
+  var setup   = document.getElementById('lwSetup');
+  var loginForm = document.getElementById('lwLogin');
+
+  // already authenticated this browser session — skip wall
+  if(sessionStorage.getItem('_fauth_ok') === '1'){
+    wall.style.display = 'none';
+    startSplash();
+    return;
+  }
+
+  // credentials exist → show login form; else show setup
+  if(stored && stored.emailHash && stored.passHash){
+    setup.classList.add('lw-hide');
+    loginForm.classList.remove('lw-hide');
+    setTimeout(function(){ var el=document.getElementById('li-email'); if(el) el.focus(); }, 100);
+  } else {
+    setTimeout(function(){ var el=document.getElementById('su-email'); if(el) el.focus(); }, 100);
+  }
+
+  function unlockApp(){
+    sessionStorage.setItem('_fauth_ok','1');
+    wall.style.transition = 'opacity .5s ease, transform .5s ease';
+    wall.style.opacity = '0';
+    wall.style.transform = 'scale(1.05)';
+    wall.style.pointerEvents = 'none';
+    setTimeout(function(){ wall.style.display = 'none'; startSplash(); }, 500);
+  }
+
+  window.doSetup = function(){
+    var email = (document.getElementById('su-email').value||'').trim().toLowerCase();
+    var pass  = document.getElementById('su-pass').value||'';
+    var pass2 = document.getElementById('su-pass2').value||'';
+    var err   = document.getElementById('su-err');
+    err.textContent = '';
+    if(!email || !email.includes('@')){ err.textContent = 'Enter a valid email.'; return; }
+    if(pass.length < 8){ err.textContent = 'Password must be at least 8 characters.'; return; }
+    if(pass !== pass2){ err.textContent = "Passwords don't match."; return; }
+    Promise.all([sha256(email), sha256(pass)]).then(function(hashes){
+      localStorage.setItem(STORE_KEY, JSON.stringify({ emailHash: hashes[0], passHash: hashes[1] }));
+      unlockApp();
+    }).catch(function(){ err.textContent = 'Setup failed. Use HTTPS.'; });
+  };
+
+  window.doLogin = function(){
+    var stored2 = getStored();
+    if(!stored2){ return; }
+    var email = (document.getElementById('li-email').value||'').trim().toLowerCase();
+    var pass  = document.getElementById('li-pass').value||'';
+    var err   = document.getElementById('li-err');
+    err.textContent = '';
+    if(!email || !pass){ err.textContent = 'Enter your email and password.'; return; }
+    Promise.all([sha256(email), sha256(pass)]).then(function(hashes){
+      if(hashes[0] === stored2.emailHash && hashes[1] === stored2.passHash){
+        unlockApp();
+      } else {
+        err.textContent = 'Incorrect email or password.';
+        document.getElementById('li-pass').value = '';
+        document.getElementById('li-pass').focus();
+      }
+    }).catch(function(){ err.textContent = 'Login failed. Use HTTPS.'; });
+  };
+})();
 </script>
 </body>
 </html>
