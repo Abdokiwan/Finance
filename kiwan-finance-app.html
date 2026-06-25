@@ -681,7 +681,7 @@
       <button id="balrefresh" class="balrefresh" onclick="loadBalances()" title="Refresh">⟳</button>
     </div>
     <div class="balgrid" id="balgrid">
-      <div class="balcard"><div class="balname">Insta</div><div class="balval" id="b-insta">—</div></div>
+      <div class="balcard"><div class="balname">NBE + HSBC</div><div class="balval" id="b-insta">—</div></div>
       <div class="balcard"><div class="balname">Cash</div><div class="balval" id="b-cash">—</div></div>
       <div class="balcard"><div class="balname">VF</div><div class="balval" id="b-vf">—</div></div>
       <div class="balcard"><div class="balname">Telda</div><div class="balval" id="b-visamisr">—</div></div>
@@ -805,7 +805,9 @@
 // ⚙️ PASTE your Apps Script Web App URL here after deploying (Step 2):
 const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyiyEZR1CA8mZa37zSF4cEbjDt2yEprkXmmuWVhiNitISn7pRoekIqe8Pu41nox8vjDIg/exec";
 
-const ACCOUNTS = ["Insta","Cash","VF","Telda","Qnb"];
+// All account names that appear in the Cash sheet's Account column
+// Add new accounts here if the sheet changes — no other code needs updating.
+const ACCOUNTS = ["NBE","Insta","Cash","VF","Telda","HSBC","Qnb"];
 
 const EXPENSE_TYPES = [
   "Paycheck","Bonus","Indriver","Parental Support","Side Income","Indriver fees",
@@ -815,12 +817,13 @@ const EXPENSE_TYPES = [
   "Occasional Supplies","Minor Maintenance","Laundry","Lost","Haircut","Withdrawal fees",
   "Fruits","Beverages","Oil change","Gym","Apple storage","Chatgpt","Boxing PT","Boxing Group",
   "Youtube","Fuel Reimbursement","Engine Oil Reimbursement","Vehicle Maintenamce Uplift",
-  "Transfer=>Insta","Transfer=>VF","Transfer=>Visa-Misr","Transfer=>Cash","Transfer=>Qnb","Uber"
+  "Transfer=>Insta","Transfer=>VF","Transfer=>Visa-Misr","Transfer=>Cash","Transfer=>Qnb","Uber",
+  "Bank Fees","Gifts","Delivery","Lending","Payback","Deposit","Insta Withdrawal","Refund"
 ];
 
 const DOLLAR_TYPES = ["Transfer In","Transfer Out","Profit","loss","Loan","Repaid"];
 
-const ACCENT = {Insta:"#9B8AD4",Cash:"#6FA8DC",VF:"#E5564E",Telda:"#3DD66A",Qnb:"#E8C547"};
+const ACCENT = {NBE:"#9B8AD4",Insta:"#9B8AD4",Cash:"#6FA8DC",VF:"#E5564E",Telda:"#3DD66A",HSBC:"#E8C547",Qnb:"#E8C547"};
 
 /* ============ STATE ============ */
 let entry = {};
@@ -861,7 +864,15 @@ function loadBalances(){
 }
 
 function showBalances(d){
-  setBal('b-insta', d.insta);
+  // The backend returns:
+  //   insta   = NBE/Insta running balance
+  //   cash    = Cash running balance
+  //   vf      = VF running balance
+  //   visamisr = Telda running balance
+  //   hsbc    = HSBC running balance (new)
+  // We combine insta + hsbc into the first card since NBE and HSBC are the main bank accounts.
+  var instaTotal = (Number(d.insta)||0) + (Number(d.hsbc)||0);
+  setBal('b-insta', instaTotal);
   setBal('b-cash', d.cash);
   setBal('b-vf', d.vf);
   setBal('b-visamisr', d.visamisr);
