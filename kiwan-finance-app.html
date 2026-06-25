@@ -589,6 +589,43 @@
   .spinner{width:20px;height:20px;border:3px solid rgba(4,20,10,.3);border-top-color:#04140a;border-radius:50%;
     display:inline-block;animation:spin .7s linear infinite;vertical-align:-4px;}
   @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ---------- MONTH SELECTOR ---------- */
+  .month-scroll{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;
+    -webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;}
+  .month-scroll::-webkit-scrollbar{display:none;}
+  .month-chip{flex:0 0 auto;padding:7px 16px;border-radius:20px;
+    border:1px solid var(--line);background:var(--card);
+    color:var(--muted);font-family:var(--mono);font-size:12px;font-weight:700;
+    cursor:pointer;transition:.15s;white-space:nowrap;scroll-snap-align:start;}
+  .month-chip:active{transform:scale(.95);}
+  .month-chip.active{background:rgba(61,214,106,.14);border-color:rgba(61,214,106,.5);color:var(--green);}
+
+  /* ---------- 5 BALANCE CARDS (last odd card goes full-width) ---------- */
+  .balgrid .balcard:last-child:nth-child(odd){grid-column:1 / -1;}
+
+  /* ---------- HERO CHIPS — tappable ---------- */
+  .hero-chip{cursor:pointer;}
+  .hero-chip:active{background:rgba(255,255,255,.08);border-radius:11px;}
+
+  /* ---------- BREAKDOWN BOTTOM SHEET ---------- */
+  .bk-list{max-height:52vh;overflow-y:auto;margin-top:4px;}
+  .bk-row{display:flex;justify-content:space-between;align-items:center;
+    padding:11px 0;border-bottom:1px solid rgba(255,255,255,.05);gap:12px;}
+  .bk-row:last-child{border-bottom:none;}
+  .bk-meta{flex:1;min-width:0;}
+  .bk-label{font-size:13px;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .bk-bar{height:3px;border-radius:3px;background:rgba(255,255,255,.06);margin-top:5px;overflow:hidden;}
+  .bk-bar-fill{height:100%;border-radius:3px;transition:width .7s cubic-bezier(.2,.8,.2,1);}
+  .bk-bar-fill.inc{background:var(--green);}
+  .bk-bar-fill.exp{background:var(--red);}
+  .bk-amt{font-size:14px;font-weight:800;flex:0 0 auto;}
+  .bk-amt.inc{color:var(--green);}
+  .bk-amt.exp{color:var(--red);}
+  .bk-divider{height:1px;background:rgba(255,255,255,.08);margin:10px 0 6px;}
+  .bk-total-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;}
+  .bk-total-label{font-size:11px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;}
+  .bk-total-val{font-size:20px;font-weight:800;}
 </style>
 </head>
 <body>
@@ -655,6 +692,9 @@
     <div class="brand">Finance Tracker</div>
     <div class="sub" id="todayline"></div>
 
+    <!-- MONTH SELECTOR -->
+    <div class="month-scroll" id="monthScroll"></div>
+
     <!-- HERO: remaining (with avg inside, right) -->
     <div class="hero" id="hero">
       <div class="hero-glow"></div>
@@ -667,8 +707,8 @@
         </div>
       </div>
       <div class="hero-row">
-        <div class="hero-chip"><span class="hc-dot in"></span>In <b id="h-income">—</b></div>
-        <div class="hero-chip"><span class="hc-dot out"></span>Out <b id="h-expense">—</b></div>
+        <div class="hero-chip" onclick="openBreakdown('in')" title="Tap for income breakdown"><span class="hc-dot in"></span>In <b id="h-income">—</b></div>
+        <div class="hero-chip" onclick="openBreakdown('out')" title="Tap for expense breakdown"><span class="hc-dot out"></span>Out <b id="h-expense">—</b></div>
       </div>
       <div class="hero-bar"><div class="hero-bar-fill" id="h-bar"></div></div>
     </div>
@@ -681,7 +721,8 @@
       <button id="balrefresh" class="balrefresh" onclick="loadBalances()" title="Refresh">⟳</button>
     </div>
     <div class="balgrid" id="balgrid">
-      <div class="balcard"><div class="balname">NBE + HSBC</div><div class="balval" id="b-insta">—</div></div>
+      <div class="balcard"><div class="balname">NBE / Insta</div><div class="balval" id="b-insta">—</div></div>
+      <div class="balcard"><div class="balname">HSBC</div><div class="balval" id="b-hsbc">—</div></div>
       <div class="balcard"><div class="balname">Cash</div><div class="balval" id="b-cash">—</div></div>
       <div class="balcard"><div class="balname">VF</div><div class="balval" id="b-vf">—</div></div>
       <div class="balcard"><div class="balname">Telda</div><div class="balval" id="b-visamisr">—</div></div>
@@ -782,6 +823,17 @@
     </div>
   </div>
 
+  <!-- ===== BREAKDOWN MODAL (In / Out detail) ===== -->
+  <div id="breakdownModal" class="modal-overlay" onclick="if(event.target===this)closeBreakdown()">
+    <div class="modal">
+      <div class="modal-head" id="breakdownTitle">Breakdown</div>
+      <div id="breakdownBody"></div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="m-save" onclick="closeBreakdown()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== FLOW ===== -->
   <section id="s-flow" class="screen">
     <div class="card">
@@ -835,13 +887,17 @@ document.getElementById('todayline').textContent =
   new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 
 /* ============ LIVE BALANCES (JSONP, reads from your sheet) ============ */
-function loadBalances(){
+var selectedMonth = null;   // null = current month (server decides)
+var currentData   = {};     // last API response, used by breakdown modal
+
+function loadBalances(month){
+  selectedMonth = month || selectedMonth;
   var btn = document.getElementById('balrefresh');
   if(btn) btn.classList.add('spin');
-  ['b-insta','b-cash','b-vf','b-visamisr'].forEach(function(id){
-    var el=document.getElementById(id); el.textContent="…"; el.className="balval loading";
+  ['b-insta','b-hsbc','b-cash','b-vf','b-visamisr'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el){ el.textContent="…"; el.className="balval loading"; }
   });
-  // unique callback name to avoid caching
   var cbName = "balCB_" + Date.now();
   window[cbName] = function(data){
     showBalances(data);
@@ -849,13 +905,14 @@ function loadBalances(){
     delete window[cbName];
     if(s) s.remove();
   };
-  var url = WEB_APP_URL + "?action=balances&callback=" + cbName + "&t=" + Date.now();
+  var url = WEB_APP_URL + "?callback=" + cbName + "&t=" + Date.now();
+  if(selectedMonth) url += "&month=" + encodeURIComponent(selectedMonth);
   var s = document.createElement('script');
   s.src = url;
   s.onerror = function(){
     if(btn) btn.classList.remove('spin');
-    ['b-insta','b-cash','b-vf','b-visamisr'].forEach(function(id){
-      var el=document.getElementById(id); el.textContent="—"; el.className="balval";
+    ['b-insta','b-hsbc','b-cash','b-vf','b-visamisr'].forEach(function(id){
+      var el=document.getElementById(id); if(el){ el.textContent="—"; el.className="balval"; }
     });
     toast("⚠️ Couldn't load balances. Pull to refresh.");
     delete window[cbName];
@@ -864,18 +921,18 @@ function loadBalances(){
 }
 
 function showBalances(d){
-  // The backend returns:
-  //   insta   = NBE/Insta running balance
-  //   cash    = Cash running balance
-  //   vf      = VF running balance
-  //   visamisr = Telda running balance
-  //   hsbc    = HSBC running balance (new)
-  // We combine insta + hsbc into the first card since NBE and HSBC are the main bank accounts.
-  var instaTotal = (Number(d.insta)||0) + (Number(d.hsbc)||0);
-  setBal('b-insta', instaTotal);
-  setBal('b-cash', d.cash);
-  setBal('b-vf', d.vf);
+  currentData = d;
+
+  // Separate cards for NBE/Insta and HSBC
+  setBal('b-insta',    d.insta);
+  setBal('b-hsbc',     d.hsbc);
+  setBal('b-cash',     d.cash);
+  setBal('b-vf',       d.vf);
   setBal('b-visamisr', d.visamisr);
+
+  // Month selector chips
+  if(d.available_months && d.available_months.length)
+    renderMonthChips(d.available_months, d.current_month || selectedMonth);
 
   // HERO: left this month
   var income = Number(d.income)||0, expense = Number(d.expense)||0, saved = Number(d.saved)||0;
@@ -946,8 +1003,70 @@ function setBal(id, val){
 }
 
 // load balances when the app opens
-loadBalances();
+loadBalances(null);
 loadMemory();
+
+/* ============ MONTH SELECTOR ============ */
+function renderMonthChips(months, active) {
+  var scroll = document.getElementById('monthScroll');
+  if(!scroll) return;
+  scroll.innerHTML = '';
+  months.forEach(function(m) {
+    var b = document.createElement('button');
+    b.className = 'month-chip' + (m === active ? ' active' : '');
+    b.textContent = m;
+    b.onclick = function() { loadBalances(m); };
+    scroll.appendChild(b);
+  });
+  // Scroll selected chip into view
+  var el = scroll.querySelector('.month-chip.active');
+  if(el) setTimeout(function(){ el.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'}); }, 120);
+}
+
+/* ============ IN / OUT BREAKDOWN ============ */
+function openBreakdown(type) {
+  var isIn  = (type === 'in');
+  var data  = isIn ? (currentData.income_breakdown || {}) : (currentData.expense_breakdown || {});
+  var month = currentData.current_month || '';
+  document.getElementById('breakdownTitle').textContent =
+    (isIn ? '⬆ Income' : '⬇ Expenses') + (month ? ' · ' + month : '');
+
+  var entries = Object.keys(data)
+    .map(function(k){ return {k:k, v:data[k]}; })
+    .sort(function(a,b){ return b.v - a.v; });
+  var total = entries.reduce(function(s,e){ return s + e.v; }, 0);
+  var cls   = isIn ? 'inc' : 'exp';
+
+  var body = document.getElementById('breakdownBody');
+  if(!entries.length) {
+    body.innerHTML = '<div style="color:var(--muted);text-align:center;padding:28px 0;font-size:14px">No data for this month.</div>';
+  } else {
+    var rows = entries.map(function(e) {
+      var pct = total > 0 ? (e.v / total * 100) : 0;
+      return '<div class="bk-row">' +
+        '<div class="bk-meta">' +
+          '<div class="bk-label">' + esc(e.k) + '</div>' +
+          '<div class="bk-bar"><div class="bk-bar-fill ' + cls + '" style="width:' + pct.toFixed(1) + '%"></div></div>' +
+        '</div>' +
+        '<div class="bk-amt ' + cls + '">' + Math.round(e.v).toLocaleString() + '</div>' +
+      '</div>';
+    }).join('');
+    body.innerHTML =
+      '<div class="bk-list">' + rows + '</div>' +
+      '<div class="bk-divider"></div>' +
+      '<div class="bk-total-row">' +
+        '<span class="bk-total-label">Total</span>' +
+        '<span class="bk-total-val" style="color:var(--' + (isIn ? 'green' : 'red') + ')">' +
+          Math.round(total).toLocaleString() +
+        '</span>' +
+      '</div>';
+  }
+  document.getElementById('breakdownModal').classList.add('active');
+}
+
+function closeBreakdown() {
+  document.getElementById('breakdownModal').classList.remove('active');
+}
 
 // cinematic splash → reveal (called by login wall after auth)
 function startSplash(){

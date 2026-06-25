@@ -181,6 +181,55 @@ function computeAvgSpend_(ss) {
   } catch(e) { return 0; }
 }
 
+/* ---------- Per-type income/expense breakdown for the selected month ---------- */
+function computeMonthBreakdown_(ss, thisMonth) {
+  var sh = ss.getSheetByName("Cash");
+  if (!sh) return { income:{}, expense:{} };
+  var col = getCashColMap_(sh);
+  var lr = sh.getLastRow();
+  if (lr < 3) return { income:{}, expense:{} };
+
+  var totalCols = Math.max(col.expCat, col.expType, col.mainCat, col.spent, col.month);
+  var vals = sh.getRange(3, 1, lr - 2, totalCols).getValues();
+
+  var income = {}, expense = {};
+  vals.forEach(function(r) {
+    var m = String(r[col.month - 1] || "").trim();
+    if (m.toLowerCase() !== thisMonth.toLowerCase()) return;
+    var expCat  = String(r[col.expCat  - 1] || "").trim();
+    var expType = String(r[col.expType - 1] || "").trim();
+    var mainCat = String(r[col.mainCat - 1] || "").trim();
+    var amt = Number(r[col.spent - 1]) || 0;
+    if (amt === 0) return;
+    var catL = expCat.toLowerCase(), typL = expType.toLowerCase(), mainL = mainCat.toLowerCase();
+    if (SKIP_CATS_SET[catL] || SKIP_CATS_SET[typL] ||
+        catL.indexOf("transfer=>") !== -1 || typL.indexOf("transfer=>") !== -1) return;
+    var label = expType || expCat || "Other";
+    if (INCOME_KEYS[catL] || INCOME_KEYS[typL] || INCOME_KEYS[mainL]) {
+      if (amt > 0) income[label] = (income[label] || 0) + amt;
+    } else if (amt < 0) {
+      expense[label] = (expense[label] || 0) + Math.abs(amt);
+    }
+  });
+  return { income:income, expense:expense };
+}
+
+/* ---------- List of months that have data in the Cash sheet ---------- */
+function getAvailableMonths_(ss) {
+  var sh = ss.getSheetByName("Cash");
+  if (!sh) return [];
+  var col = getCashColMap_(sh);
+  var lr = sh.getLastRow();
+  if (lr < 3) return [];
+  var vals = sh.getRange(3, 1, lr - 2, col.month).getValues();
+  var seen = {}, months = [];
+  vals.forEach(function(r) {
+    var m = String(r[col.month - 1] || "").trim();
+    if (m && !seen[m]) { seen[m] = true; months.push(m); }
+  });
+  return months;
+}
+
 /* ============================================================
    doGet: balances + AI ask (JSONP)
    ============================================================ */
@@ -209,26 +258,36 @@ function doGet(e) {
 
   } else {
     // Default: return balances + month summary
+    // Accepts optional ?month=June to view a specific month's totals
     var tz = ss.getSpreadsheetTimeZone();
-    var thisMonth = Utilities.formatDate(new Date(), tz, "MMMM");
+    var reqMonth  = (e && e.parameter && e.parameter.month) ? e.parameter.month : null;
+    var thisMonth = reqMonth || Utilities.formatDate(new Date(), tz, "MMMM");
 
-    var balances = computeAccountBalances_(ss);
-    var totals   = computeMonthTotals_(ss, thisMonth);
-    var avgSpend = computeAvgSpend_(ss);
+    var balances  = computeAccountBalances_(ss);
+    var totals    = computeMonthTotals_(ss, thisMonth);
+    var breakdown = computeMonthBreakdown_(ss, thisMonth);
+    var avgSpend  = computeAvgSpend_(ss);
+    var allMonths = getAvailableMonths_(ss);
 
     out = {
-      // Account balances — keep old keys so the HTML needs no change
+      // Account balances — separate cards for NBE/Insta and HSBC
       insta:    balances["Insta"]  || 0,
+      hsbc:     balances["HSBC"]   || 0,
       cash:     balances["Cash"]   || 0,
       vf:       balances["VF"]     || 0,
       visamisr: balances["Telda"]  || 0,
-      hsbc:     balances["HSBC"]   || 0,
       qnb:      balances["Qnb"]    || 0,
       visa:     balances["Visa"]   || 0,
       // Monthly summary
       income:   totals.income,
       expense:  totals.expense,
       saved:    totals.saved,
+      // Breakdown by type (for tap-to-expand In/Out)
+      income_breakdown:  breakdown.income,
+      expense_breakdown: breakdown.expense,
+      // Month navigation
+      current_month:     thisMonth,
+      available_months:  allMonths,
       // Spend tracking
       avgSpend:    MONTHLY_LIMIT,
       avgSpending: avgSpend,
