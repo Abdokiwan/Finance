@@ -635,6 +635,36 @@
   /* ---------- 5 BALANCE CARDS (last odd card goes full-width) ---------- */
   .balgrid .balcard:last-child:nth-child(odd){grid-column:1 / -1;}
 
+  /* ---------- MONTHLY SUMMARY (inline In/Out on home) ---------- */
+  .ms-card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:18px 16px;margin-bottom:18px;}
+  .ms-month-lbl{font-size:11px;letter-spacing:2px;text-transform:uppercase;
+    color:var(--muted);margin-bottom:16px;font-weight:700;}
+  .ms-section{margin-bottom:18px;}
+  .ms-section:last-child{margin-bottom:0;}
+  .ms-sec-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;}
+  .ms-sec-title{font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;}
+  .ms-sec-title.in{color:var(--green);}
+  .ms-sec-title.out{color:var(--red);}
+  .ms-sec-total{font-size:17px;font-weight:800;}
+  .ms-sec-total.in{color:var(--green);}
+  .ms-sec-total.out{color:var(--red);}
+  .ms-divider{height:1px;background:rgba(255,255,255,.07);margin-bottom:10px;}
+  .ms-row{display:flex;align-items:center;gap:10px;padding:6px 0;
+    border-bottom:1px solid rgba(255,255,255,.04);}
+  .ms-row:last-child{border-bottom:none;}
+  .ms-lbl{font-size:12px;color:var(--txt);flex:0 0 110px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ms-bar-wrap{flex:1;height:4px;background:rgba(255,255,255,.07);border-radius:4px;overflow:hidden;}
+  .ms-bar-fill{height:100%;border-radius:4px;width:0;
+    transition:width .8s cubic-bezier(.2,.8,.2,1);}
+  .ms-bar-fill.in{background:var(--green);}
+  .ms-bar-fill.out{background:var(--red);}
+  .ms-amt{font-size:12px;font-weight:800;flex:0 0 auto;text-align:right;min-width:58px;}
+  .ms-amt.in{color:var(--green);}
+  .ms-amt.out{color:var(--red);}
+  .ms-empty{color:var(--muted);font-size:13px;text-align:center;padding:10px 0;}
+
   /* ---------- HERO CHIPS — tappable ---------- */
   .hero-chip{cursor:pointer;}
   .hero-chip:active{background:rgba(255,255,255,.08);border-radius:11px;}
@@ -757,6 +787,27 @@
     </div>
 
     <span id="m-limit" style="display:none"></span><span id="m-limitfill" style="display:none"></span>
+
+    <!-- MONTHLY SUMMARY (inline In/Out breakdown) -->
+    <div class="ms-card" id="msSummary" style="display:none">
+      <div class="ms-month-lbl" id="msMonthLbl">This Month</div>
+      <div class="ms-section">
+        <div class="ms-sec-head">
+          <span class="ms-sec-title in">⬆ Income (In)</span>
+          <span class="ms-sec-total in" id="msTotalIn">—</span>
+        </div>
+        <div class="ms-divider"></div>
+        <div id="msRowsIn"></div>
+      </div>
+      <div class="ms-section">
+        <div class="ms-sec-head">
+          <span class="ms-sec-title out">⬇ Expenses (Out)</span>
+          <span class="ms-sec-total out" id="msTotalOut">—</span>
+        </div>
+        <div class="ms-divider"></div>
+        <div id="msRowsOut"></div>
+      </div>
+    </div>
 
     <!-- LIVE ACCOUNT BALANCES -->
     <div class="bal-head">
@@ -977,6 +1028,9 @@ function showBalances(d){
   if(d.available_months && d.available_months.length)
     renderMonthChips(d.available_months, d.current_month || selectedMonth);
 
+  // Inline monthly summary (In/Out breakdown)
+  renderMonthlySummary(d.income_breakdown || {}, d.expense_breakdown || {}, d.current_month || selectedMonth || '');
+
   // HERO: left this month
   var income = Number(d.income)||0, expense = Number(d.expense)||0, saved = Number(d.saved)||0;
   countUp('h-saved', saved, function(el){ el.className = "hero-val" + (saved<0?" neg":""); });
@@ -1066,7 +1120,48 @@ function renderMonthChips(months, active) {
   if(el) setTimeout(function(){ el.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'}); }, 120);
 }
 
-/* ============ IN / OUT BREAKDOWN ============ */
+/* ============ MONTHLY SUMMARY (inline) ============ */
+function renderMonthlySummary(incomeData, expenseData, month) {
+  var card = document.getElementById('msSummary');
+  if(!card) return;
+  var hasData = Object.keys(incomeData).length > 0 || Object.keys(expenseData).length > 0;
+  card.style.display = hasData ? 'block' : 'none';
+  if(!hasData) return;
+
+  var lbl = document.getElementById('msMonthLbl');
+  if(lbl && month) lbl.textContent = month;
+
+  function buildSection(data, cls, totalId, rowsId) {
+    var entries = Object.keys(data)
+      .map(function(k){ return {k:k, v:data[k]}; })
+      .sort(function(a,b){ return b.v - a.v; });
+    var total = entries.reduce(function(s,e){ return s+e.v; }, 0);
+    var totalEl = document.getElementById(totalId);
+    if(totalEl) totalEl.textContent = Math.round(total).toLocaleString() + ' EGP';
+    var rowsEl = document.getElementById(rowsId);
+    if(!rowsEl) return;
+    if(!entries.length){ rowsEl.innerHTML='<div class="ms-empty">No data</div>'; return; }
+    rowsEl.innerHTML = entries.map(function(e){
+      var pct = total > 0 ? (e.v/total*100).toFixed(1) : 0;
+      return '<div class="ms-row">' +
+        '<div class="ms-lbl">' + esc(e.k) + '</div>' +
+        '<div class="ms-bar-wrap"><div class="ms-bar-fill ' + cls + '" data-pct="' + pct + '"></div></div>' +
+        '<div class="ms-amt ' + cls + '">' + Math.round(e.v).toLocaleString() + '</div>' +
+      '</div>';
+    }).join('');
+    // animate bars after render
+    setTimeout(function(){
+      rowsEl.querySelectorAll('.ms-bar-fill').forEach(function(el){
+        el.style.width = el.getAttribute('data-pct') + '%';
+      });
+    }, 80);
+  }
+
+  buildSection(incomeData,  'in',  'msTotalIn',  'msRowsIn');
+  buildSection(expenseData, 'out', 'msTotalOut', 'msRowsOut');
+}
+
+/* ============ IN / OUT BREAKDOWN (modal — tap hero chips) ============ */
 function openBreakdown(type) {
   var isIn  = (type === 'in');
   var data  = isIn ? (currentData.income_breakdown || {}) : (currentData.expense_breakdown || {});
