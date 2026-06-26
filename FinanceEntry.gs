@@ -181,7 +181,10 @@ function computeAvgSpend_(ss) {
   } catch(e) { return 0; }
 }
 
-/* ---------- Per-type income/expense breakdown for the selected month ---------- */
+/* ---------- Per-main-category breakdown with detail sub-items ----------
+ * Returns { income: { MainCat: { total, items:{detail:amt} } },
+ *           expense: { MainCat: { total, items:{detail:amt} } } }
+ */
 function computeMonthBreakdown_(ss, thisMonth) {
   var sh = ss.getSheetByName("Cash");
   if (!sh) return { income:{}, expense:{} };
@@ -198,17 +201,23 @@ function computeMonthBreakdown_(ss, thisMonth) {
     if (m.toLowerCase() !== thisMonth.toLowerCase()) return;
     var expCat  = String(r[col.expCat  - 1] || "").trim();
     var expType = String(r[col.expType - 1] || "").trim();
-    var mainCat = String(r[col.mainCat - 1] || "").trim();
+    var mainCat = String(r[col.mainCat - 1] || "").trim() || "Other";
     var amt = Number(r[col.spent - 1]) || 0;
     if (amt === 0) return;
     var catL = expCat.toLowerCase(), typL = expType.toLowerCase(), mainL = mainCat.toLowerCase();
     if (SKIP_CATS_SET[catL] || SKIP_CATS_SET[typL] ||
         catL.indexOf("transfer=>") !== -1 || typL.indexOf("transfer=>") !== -1) return;
-    var label = expType || expCat || "Other";
+    var detail = expType || expCat || "Other";
     if (INCOME_KEYS[catL] || INCOME_KEYS[typL] || INCOME_KEYS[mainL]) {
-      if (amt > 0) income[label] = (income[label] || 0) + amt;
+      if (amt > 0) {
+        if (!income[mainCat]) income[mainCat] = { total:0, items:{} };
+        income[mainCat].total += amt;
+        income[mainCat].items[detail] = (income[mainCat].items[detail] || 0) + amt;
+      }
     } else if (amt < 0) {
-      expense[label] = (expense[label] || 0) + Math.abs(amt);
+      if (!expense[mainCat]) expense[mainCat] = { total:0, items:{} };
+      expense[mainCat].total += Math.abs(amt);
+      expense[mainCat].items[detail] = (expense[mainCat].items[detail] || 0) + Math.abs(amt);
     }
   });
   return { income:income, expense:expense };

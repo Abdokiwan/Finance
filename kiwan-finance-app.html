@@ -676,6 +676,38 @@
   .ms-amt.in{color:var(--green);}
   .ms-amt.out{color:var(--red);}
   .ms-empty{color:var(--muted);font-size:13px;text-align:center;padding:10px 0;}
+  /* collapsible main-category rows */
+  .ms-cat-row{display:flex;align-items:center;gap:10px;padding:7px 0;cursor:pointer;
+    border-bottom:1px solid rgba(255,255,255,.04);}
+  .ms-cat-row:last-of-type{border-bottom:none;}
+  .ms-cat-arrow{font-size:9px;color:var(--muted);transition:transform .25s;
+    flex-shrink:0;width:10px;text-align:center;}
+  .ms-cat-arrow.open{transform:rotate(90deg);}
+  .ms-details-wrap{overflow:hidden;max-height:0;transition:max-height .35s ease;}
+  .ms-details-wrap.open{max-height:900px;}
+  .ms-detail-row{display:flex;align-items:center;gap:8px;padding:5px 0 5px 20px;
+    border-bottom:1px solid rgba(255,255,255,.03);}
+  .ms-detail-row:last-child{border-bottom:none;}
+  .ms-detail-lbl{font-size:11px;color:var(--muted);flex:1;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ms-detail-amt{font-size:11px;font-weight:700;flex-shrink:0;}
+  .ms-detail-amt.in{color:var(--green);}
+  .ms-detail-amt.out{color:var(--red);}
+  /* breakdown modal nested rows */
+  .bk-cat-row{cursor:pointer;display:flex;align-items:center;gap:12px;
+    padding:11px 0;border-bottom:1px solid rgba(255,255,255,.05);}
+  .bk-cat-row:last-of-type{border-bottom:none;}
+  .bk-cat-arrow{font-size:9px;color:var(--muted);transition:transform .25s;flex-shrink:0;}
+  .bk-cat-arrow.open{transform:rotate(90deg);}
+  .bk-sub-wrap{overflow:hidden;max-height:0;transition:max-height .35s ease;}
+  .bk-sub-wrap.open{max-height:900px;}
+  .bk-sub-row{display:flex;justify-content:space-between;align-items:center;
+    padding:7px 0 7px 26px;border-bottom:1px solid rgba(255,255,255,.03);}
+  .bk-sub-row:last-child{border-bottom:none;}
+  .bk-sub-lbl{font-size:12px;color:var(--muted);}
+  .bk-sub-amt{font-size:12px;font-weight:700;}
+  .bk-sub-amt.inc{color:var(--green);}
+  .bk-sub-amt.exp{color:var(--red);}
 
   /* ---------- HERO CHIPS — tappable ---------- */
   .hero-chip{cursor:pointer;}
@@ -1144,8 +1176,9 @@ function renderMonthlySummary(incomeData, expenseData, month) {
   if(lbl && month) lbl.textContent = month;
 
   function buildSection(data, cls, totalId, rowsId) {
+    // data is { MainCat: { total, items:{detail:amt} } }
     var entries = Object.keys(data)
-      .map(function(k){ return {k:k, v:data[k]}; })
+      .map(function(k){ return {k:k, v:(data[k].total||data[k]), items:(data[k].items||{})}; })
       .sort(function(a,b){ return b.v - a.v; });
     var total = entries.reduce(function(s,e){ return s+e.v; }, 0);
     var totalEl = document.getElementById(totalId);
@@ -1153,15 +1186,26 @@ function renderMonthlySummary(incomeData, expenseData, month) {
     var rowsEl = document.getElementById(rowsId);
     if(!rowsEl) return;
     if(!entries.length){ rowsEl.innerHTML='<div class="ms-empty">No data</div>'; return; }
-    rowsEl.innerHTML = entries.map(function(e){
+    rowsEl.innerHTML = entries.map(function(e, i){
       var pct = total > 0 ? (e.v/total*100).toFixed(1) : 0;
-      return '<div class="ms-row">' +
-        '<div class="ms-lbl">' + esc(e.k) + '</div>' +
-        '<div class="ms-bar-wrap"><div class="ms-bar-fill ' + cls + '" data-pct="' + pct + '"></div></div>' +
-        '<div class="ms-amt ' + cls + '">' + Math.round(e.v).toLocaleString() + '</div>' +
-      '</div>';
+      var uid = rowsId + '_' + i;
+      var subItems = Object.keys(e.items)
+        .map(function(k){ return {k:k, v:e.items[k]}; })
+        .sort(function(a,b){ return b.v - a.v; });
+      var detailHtml = subItems.map(function(s){
+        return '<div class="ms-detail-row">' +
+          '<div class="ms-detail-lbl">' + esc(s.k) + '</div>' +
+          '<div class="ms-detail-amt ' + cls + '">' + Math.round(s.v).toLocaleString() + '</div>' +
+        '</div>';
+      }).join('');
+      return '<div class="ms-cat-row" onclick="msCatToggle(\'' + uid + '\')">' +
+          '<div class="ms-cat-arrow" id="msa_' + uid + '">▶</div>' +
+          '<div class="ms-lbl">' + esc(e.k) + '</div>' +
+          '<div class="ms-bar-wrap"><div class="ms-bar-fill ' + cls + '" data-pct="' + pct + '"></div></div>' +
+          '<div class="ms-amt ' + cls + '">' + Math.round(e.v).toLocaleString() + '</div>' +
+        '</div>' +
+        '<div class="ms-details-wrap" id="msd_' + uid + '">' + detailHtml + '</div>';
     }).join('');
-    // animate bars after render
     setTimeout(function(){
       rowsEl.querySelectorAll('.ms-bar-fill').forEach(function(el){
         el.style.width = el.getAttribute('data-pct') + '%';
@@ -1173,6 +1217,14 @@ function renderMonthlySummary(incomeData, expenseData, month) {
   buildSection(expenseData, 'out', 'msTotalOut', 'msRowsOut');
 }
 
+function msCatToggle(uid) {
+  var det = document.getElementById('msd_' + uid);
+  var arr = document.getElementById('msa_' + uid);
+  if(!det) return;
+  det.classList.toggle('open');
+  if(arr) arr.classList.toggle('open');
+}
+
 /* ============ IN / OUT BREAKDOWN (modal — tap hero chips) ============ */
 function openBreakdown(type) {
   var isIn  = (type === 'in');
@@ -1181,8 +1233,9 @@ function openBreakdown(type) {
   document.getElementById('breakdownTitle').textContent =
     (isIn ? '⬆ Income' : '⬇ Expenses') + (month ? ' · ' + month : '');
 
+  // data is { MainCat: { total, items:{detail:amt} } }
   var entries = Object.keys(data)
-    .map(function(k){ return {k:k, v:data[k]}; })
+    .map(function(k){ return {k:k, v:(data[k].total||data[k]), items:(data[k].items||{})}; })
     .sort(function(a,b){ return b.v - a.v; });
   var total = entries.reduce(function(s,e){ return s + e.v; }, 0);
   var cls   = isIn ? 'inc' : 'exp';
@@ -1191,15 +1244,27 @@ function openBreakdown(type) {
   if(!entries.length) {
     body.innerHTML = '<div style="color:var(--muted);text-align:center;padding:28px 0;font-size:14px">No data for this month.</div>';
   } else {
-    var rows = entries.map(function(e) {
+    var rows = entries.map(function(e, i) {
       var pct = total > 0 ? (e.v / total * 100) : 0;
-      return '<div class="bk-row">' +
-        '<div class="bk-meta">' +
-          '<div class="bk-label">' + esc(e.k) + '</div>' +
-          '<div class="bk-bar"><div class="bk-bar-fill ' + cls + '" style="width:' + pct.toFixed(1) + '%"></div></div>' +
+      var uid = 'bk_' + i;
+      var subItems = Object.keys(e.items)
+        .map(function(k){ return {k:k, v:e.items[k]}; })
+        .sort(function(a,b){ return b.v - a.v; });
+      var subHtml = subItems.map(function(s){
+        return '<div class="bk-sub-row">' +
+          '<div class="bk-sub-lbl">' + esc(s.k) + '</div>' +
+          '<div class="bk-sub-amt ' + cls + '">' + Math.round(s.v).toLocaleString() + '</div>' +
+        '</div>';
+      }).join('');
+      return '<div class="bk-cat-row" onclick="bkCatToggle(\'' + uid + '\')">' +
+          '<div class="bk-cat-arrow" id="bka_' + uid + '">▶</div>' +
+          '<div class="bk-meta">' +
+            '<div class="bk-label">' + esc(e.k) + '</div>' +
+            '<div class="bk-bar"><div class="bk-bar-fill ' + cls + '" style="width:' + pct.toFixed(1) + '%"></div></div>' +
+          '</div>' +
+          '<div class="bk-amt ' + cls + '">' + Math.round(e.v).toLocaleString() + '</div>' +
         '</div>' +
-        '<div class="bk-amt ' + cls + '">' + Math.round(e.v).toLocaleString() + '</div>' +
-      '</div>';
+        '<div class="bk-sub-wrap" id="bks_' + uid + '">' + subHtml + '</div>';
     }).join('');
     body.innerHTML =
       '<div class="bk-list">' + rows + '</div>' +
@@ -1212,6 +1277,14 @@ function openBreakdown(type) {
       '</div>';
   }
   document.getElementById('breakdownModal').classList.add('active');
+}
+
+function bkCatToggle(uid) {
+  var sub = document.getElementById('bks_' + uid);
+  var arr = document.getElementById('bka_' + uid);
+  if(!sub) return;
+  sub.classList.toggle('open');
+  if(arr) arr.classList.toggle('open');
 }
 
 function closeBreakdown() {
