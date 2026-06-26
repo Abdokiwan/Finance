@@ -1116,9 +1116,12 @@ function showBalances(d){
   setBal('b-vf',       d.vf);
   setBal('b-visamisr', d.visamisr);
 
-  // Month selector chips
-  if(d.available_months && d.available_months.length)
-    renderMonthChips(d.available_months, d.current_month || selectedMonth);
+  // Month selector chips — fall back to all 12 if GAS hasn't returned available_months yet
+  var _months = (d.available_months && d.available_months.length)
+    ? d.available_months
+    : ['January','February','March','April','May','June',
+       'July','August','September','October','November','December'];
+  renderMonthChips(_months, d.current_month || selectedMonth);
 
   // Inline monthly summary (In/Out breakdown)
   renderMonthlySummary(d.income_breakdown || {}, d.expense_breakdown || {}, d.current_month || selectedMonth || '');
