@@ -14,16 +14,28 @@
     --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  html,body{margin:0;height:100%;}
+  html{
+    margin:0;height:100%;
+    /* base dark fill so the screen is never blank on iOS */
+    background:var(--bg);
+  }
   body{
     background:
       radial-gradient(1200px 600px at 80% -10%, rgba(61,214,106,.07), transparent 60%),
       radial-gradient(900px 500px at -10% 110%, rgba(111,168,220,.06), transparent 55%),
-      var(--bg);
+      transparent;
     color:var(--txt);
     font-family:var(--mono);
-    display:flex;align-items:center;justify-content:center;
-    padding:18px;min-height:100vh;
+    display:flex;align-items:flex-start;justify-content:center;
+    /* safe-area-inset respects iPhone notch + home bar */
+    padding:
+      max(env(safe-area-inset-top,18px),18px)
+      max(env(safe-area-inset-right,18px),18px)
+      max(env(safe-area-inset-bottom,18px),18px)
+      max(env(safe-area-inset-left,18px),18px);
+    /* 100dvh = real visible height (shrinks/grows with Safari address bar) */
+    min-height:100vh;
+    min-height:100dvh;
   }
   .app{width:100%;max-width:440px;}
   .screen{display:none;animation:rise .45s cubic-bezier(.2,.8,.2,1);}
@@ -2084,12 +2096,7 @@ function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg
   var loginForm = document.getElementById('lwLogin');
   var bioPanel  = document.getElementById('lwBio');
 
-  // already authenticated this session — skip wall
-  if(sessionStorage.getItem('_fauth_ok') === '1'){
-    wall.style.display = 'none';
-    startSplash();
-    return;
-  }
+  var appStarted = false;
 
   function unlockApp(){
     sessionStorage.setItem('_fauth_ok','1');
@@ -2097,16 +2104,45 @@ function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg
     wall.style.opacity = '0';
     wall.style.transform = 'scale(1.05)';
     wall.style.pointerEvents = 'none';
-    setTimeout(function(){ wall.style.display='none'; startSplash(); }, 500);
+    setTimeout(function(){
+      wall.style.display = 'none';
+      if(!appStarted){ startSplash(); appStarted = true; }
+    }, 500);
   }
+
+  function lockApp(){
+    sessionStorage.removeItem('_fauth_ok');
+    wall.style.cssText = '';
+    setup.classList.add('lw-hide');
+    loginForm.classList.add('lw-hide');
+    if(bioPanel) bioPanel.classList.add('lw-hide');
+    var s = getStored();
+    if(getBioId() && bioSupported() && s && s.emailHash){
+      window.tryBiometric(false);
+    } else {
+      window.showPasswordForm();
+    }
+  }
+
+  // Lock when app goes to background; re-prompt Face ID when it returns
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'hidden'){
+      sessionStorage.removeItem('_fauth_ok');
+    } else if(document.visibilityState === 'visible'){
+      if(sessionStorage.getItem('_fauth_ok') !== '1'){
+        var s2 = getStored();
+        if(s2 && s2.emailHash) lockApp();
+      }
+    }
+  });
 
   // Show the plain password form (fallback from bio)
   window.showPasswordForm = function(){
     if(bioPanel)  bioPanel.classList.add('lw-hide');
-    if(stored && stored.emailHash && stored.passHash){
+    var s = getStored();
+    if(s && s.emailHash && s.passHash){
       setup.classList.add('lw-hide');
       loginForm.classList.remove('lw-hide');
-      // Show Face ID button if credential registered
       var fbtn = document.getElementById('faceIdBtn');
       if(fbtn && getBioId() && bioSupported()) fbtn.style.display = 'flex';
       setTimeout(function(){ var el=document.getElementById('li-pass'); if(el) el.focus(); }, 120);
@@ -2200,15 +2236,19 @@ function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg
     }).catch(function(){});
   };
 
-  // ---- Initial routing ----
-  var credId = getBioId();
-  if(credId && bioSupported() && stored && stored.emailHash){
-    // Biometric registered — go straight to Face ID flow
-    window.tryBiometric(false);
-  } else if(stored && stored.emailHash && stored.passHash){
-    window.showPasswordForm();
+  // ---- Initial routing (no early return — visibilitychange listener must always be registered) ----
+  if(sessionStorage.getItem('_fauth_ok') === '1'){
+    wall.style.display = 'none';
+    if(!appStarted){ startSplash(); appStarted = true; }
   } else {
-    setTimeout(function(){ var el=document.getElementById('su-email'); if(el) el.focus(); }, 120);
+    var credId = getBioId();
+    if(credId && bioSupported() && stored && stored.emailHash){
+      window.tryBiometric(false);
+    } else if(stored && stored.emailHash && stored.passHash){
+      window.showPasswordForm();
+    } else {
+      setTimeout(function(){ var el=document.getElementById('su-email'); if(el) el.focus(); }, 120);
+    }
   }
 
   window.doSetup = function(){
