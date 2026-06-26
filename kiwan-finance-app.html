@@ -336,6 +336,37 @@
   .lw-err{color:var(--red);font-size:13px;text-align:center;margin-top:12px;min-height:18px;}
   .lw-hide{display:none!important;}
 
+  /* ---------- BIOMETRIC / FACE ID ---------- */
+  .lw-bio-state{text-align:center;padding:10px 0 6px;}
+  .lw-bio-icon{font-size:56px;margin-bottom:14px;display:block;
+    animation:bioPulse 2.2s ease-in-out infinite;}
+  @keyframes bioPulse{0%,100%{opacity:.7;transform:scale(.95)}50%{opacity:1;transform:scale(1.06)}}
+  .lw-bio-title{font-size:22px;font-weight:800;margin-bottom:8px;letter-spacing:-.5px;}
+  .lw-bio-sub{color:var(--muted);font-size:13px;margin-bottom:22px;line-height:1.6;}
+  .lw-btn-bio{width:100%;background:rgba(61,214,106,.12);border:1.5px solid rgba(61,214,106,.35);
+    border-radius:16px;padding:17px;color:var(--green);font-family:var(--mono);font-size:15px;
+    font-weight:800;cursor:pointer;transition:.15s;margin-bottom:14px;
+    display:flex;align-items:center;justify-content:center;gap:10px;}
+  .lw-btn-bio:active{transform:scale(.97);background:rgba(61,214,106,.2);}
+  .lw-btn-ghost{width:100%;background:none;border:1px solid var(--line);border-radius:14px;
+    padding:14px;color:var(--muted);font-family:var(--mono);font-size:13px;font-weight:700;
+    cursor:pointer;transition:.15s;margin-top:8px;}
+  .lw-btn-ghost:active{transform:scale(.97);}
+  /* bio setup offer banner (shown after first unlock) */
+  .bio-offer{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+    background:#15202e;border:1px solid rgba(61,214,106,.3);border-radius:18px;
+    padding:18px 20px;width:calc(100% - 36px);max-width:420px;z-index:300;
+    animation:slideUp .4s cubic-bezier(.2,.8,.2,1);}
+  @keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(20px)}
+    to{opacity:1;transform:translateX(-50%) translateY(0)}}
+  .bio-offer-title{font-size:15px;font-weight:800;margin-bottom:4px;}
+  .bio-offer-sub{color:var(--muted);font-size:12px;margin-bottom:14px;line-height:1.5;}
+  .bio-offer-btns{display:flex;gap:10px;}
+  .bio-offer-btns button{flex:1;padding:13px;border-radius:12px;border:none;
+    font-family:var(--mono);font-size:13px;font-weight:800;cursor:pointer;transition:.12s;}
+  .bio-offer-yes{background:var(--green);color:#04140a;}
+  .bio-offer-no{background:var(--line);color:var(--muted);}
+
   /* ---------- TOP ICONS (mic + history) ---------- */
   .top-icons{position:absolute;top:0;right:0;z-index:20;display:flex;gap:8px;}
   .top-ic{width:38px;height:38px;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -634,6 +665,17 @@
   <div class="lw-box">
     <div class="lw-logo">Finance Tracker</div>
 
+    <!-- BIOMETRIC / FACE ID STATE (shown during auto-auth or when tapping Face ID) -->
+    <div id="lwBio" class="lw-hide">
+      <div class="lw-bio-state">
+        <span class="lw-bio-icon">🔒</span>
+        <div class="lw-bio-title" id="bioTitle">Unlock with Face ID</div>
+        <div class="lw-bio-sub" id="bioSub">Tap below to authenticate with your device biometric.</div>
+        <button class="lw-btn-bio" onclick="tryBiometric(true)">🔒 &nbsp;Use Face ID</button>
+        <button class="lw-btn-ghost" onclick="showPasswordForm()">Use Password Instead</button>
+      </div>
+    </div>
+
     <!-- SETUP FORM (first time only) -->
     <div id="lwSetup">
       <div class="lw-title">Create your password</div>
@@ -659,6 +701,7 @@
     <div id="lwLogin" class="lw-hide">
       <div class="lw-title">Welcome back<span style="color:var(--green)">.</span></div>
       <div class="lw-sub">Sign in to access your finances.</div>
+      <button class="lw-btn-bio" id="faceIdBtn" onclick="tryBiometric(true)" style="display:none">🔒 &nbsp;Use Face ID</button>
       <div class="lw-field">
         <label class="lw-label">Email</label>
         <input id="li-email" class="lw-input" type="email" placeholder="you@example.com" autocomplete="email" />
@@ -1926,6 +1969,7 @@ function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg
 /* ========== LOGIN WALL ========== */
 (function(){
   var STORE_KEY = '_fauth_v1';
+  var BIO_KEY   = '_fauth_bio_v1';   // base64 credential ID
 
   function sha256(str){
     return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str))
@@ -1934,29 +1978,22 @@ function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg
       });
   }
 
-  function getStored(){
-    try { return JSON.parse(localStorage.getItem(STORE_KEY)||'null'); } catch(e){ return null; }
-  }
+  function getStored(){ try{ return JSON.parse(localStorage.getItem(STORE_KEY)||'null'); }catch(e){ return null; } }
+  function getBioId(){  try{ return localStorage.getItem(BIO_KEY)||null; }catch(e){ return null; } }
+  function bioSupported(){ return !!(window.PublicKeyCredential && navigator.credentials); }
+  function randomChallenge(){ var c=new Uint8Array(32); crypto.getRandomValues(c); return c; }
 
-  var stored = getStored();
-  var wall    = document.getElementById('loginWall');
-  var setup   = document.getElementById('lwSetup');
+  var stored    = getStored();
+  var wall      = document.getElementById('loginWall');
+  var setup     = document.getElementById('lwSetup');
   var loginForm = document.getElementById('lwLogin');
+  var bioPanel  = document.getElementById('lwBio');
 
-  // already authenticated this browser session — skip wall
+  // already authenticated this session — skip wall
   if(sessionStorage.getItem('_fauth_ok') === '1'){
     wall.style.display = 'none';
     startSplash();
     return;
-  }
-
-  // credentials exist → show login form; else show setup
-  if(stored && stored.emailHash && stored.passHash){
-    setup.classList.add('lw-hide');
-    loginForm.classList.remove('lw-hide');
-    setTimeout(function(){ var el=document.getElementById('li-email'); if(el) el.focus(); }, 100);
-  } else {
-    setTimeout(function(){ var el=document.getElementById('su-email'); if(el) el.focus(); }, 100);
   }
 
   function unlockApp(){
@@ -1965,41 +2002,153 @@ function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg
     wall.style.opacity = '0';
     wall.style.transform = 'scale(1.05)';
     wall.style.pointerEvents = 'none';
-    setTimeout(function(){ wall.style.display = 'none'; startSplash(); }, 500);
+    setTimeout(function(){ wall.style.display='none'; startSplash(); }, 500);
+  }
+
+  // Show the plain password form (fallback from bio)
+  window.showPasswordForm = function(){
+    if(bioPanel)  bioPanel.classList.add('lw-hide');
+    if(stored && stored.emailHash && stored.passHash){
+      setup.classList.add('lw-hide');
+      loginForm.classList.remove('lw-hide');
+      // Show Face ID button if credential registered
+      var fbtn = document.getElementById('faceIdBtn');
+      if(fbtn && getBioId() && bioSupported()) fbtn.style.display = 'flex';
+      setTimeout(function(){ var el=document.getElementById('li-pass'); if(el) el.focus(); }, 120);
+    } else {
+      setTimeout(function(){ var el=document.getElementById('su-email'); if(el) el.focus(); }, 120);
+    }
+  };
+
+  // Try biometric — fromButton=true means user tapped, false means auto-trigger on load
+  window.tryBiometric = function(fromButton){
+    var credB64 = getBioId();
+    if(!credB64 || !bioSupported()){ window.showPasswordForm(); return; }
+
+    // Show biometric panel
+    setup.classList.add('lw-hide');
+    loginForm.classList.add('lw-hide');
+    if(bioPanel) bioPanel.classList.remove('lw-hide');
+
+    var credBytes = Uint8Array.from(atob(credB64), function(c){ return c.charCodeAt(0); });
+
+    navigator.credentials.get({
+      publicKey:{
+        challenge: randomChallenge(),
+        allowCredentials:[{ type:'public-key', id:credBytes }],
+        userVerification:'required',
+        timeout: 60000
+      }
+    }).then(function(assertion){
+      if(assertion) unlockApp();
+    }).catch(function(err){
+      if(!fromButton && err.name === 'NotAllowedError'){
+        // Auto-trigger was blocked (browser requires user gesture) — keep panel, user taps button
+        var t=document.getElementById('bioTitle'), s=document.getElementById('bioSub');
+        if(t) t.textContent='Tap to unlock';
+        if(s) s.textContent='Your device is ready — tap the button to authenticate with Face ID.';
+      } else {
+        // Cancelled or failed — fall back to password
+        window.showPasswordForm();
+        if(fromButton){
+          var el=document.getElementById('li-err'); if(el) el.textContent='Face ID failed. Enter your password.';
+        }
+      }
+    });
+  };
+
+  // Offer biometric registration after first unlock
+  function offerBiometric(){
+    if(!bioSupported() || getBioId()) return;
+    PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(function(ok){
+      if(!ok) return;
+      setTimeout(function(){
+        var el=document.createElement('div');
+        el.className='bio-offer'; el.id='bioOffer';
+        el.innerHTML=
+          '<div class="bio-offer-title">Enable Face ID?</div>'+
+          '<div class="bio-offer-sub">Next time you open the app, it will unlock automatically — no password needed.</div>'+
+          '<div class="bio-offer-btns">'+
+          '<button class="bio-offer-yes" onclick="doRegisterBio()">Enable Face ID</button>'+
+          '<button class="bio-offer-no" onclick="dismissBioOffer()">Not now</button>'+
+          '</div>';
+        document.body.appendChild(el);
+      }, 1400);
+    }).catch(function(){});
+  }
+
+  window.dismissBioOffer = function(){ var el=document.getElementById('bioOffer'); if(el) el.remove(); };
+
+  window.doRegisterBio = function(){
+    window.dismissBioOffer();
+    navigator.credentials.create({
+      publicKey:{
+        challenge: randomChallenge(),
+        rp:{ name:'Finance Tracker', id:location.hostname },
+        user:{ id:new Uint8Array(16), name:'kiwan', displayName:'Kiwan' },
+        pubKeyCredParams:[
+          { type:'public-key', alg:-7   },   // ES256
+          { type:'public-key', alg:-257 }    // RS256
+        ],
+        authenticatorSelection:{
+          authenticatorAttachment:'platform',
+          userVerification:'required',
+          residentKey:'preferred'
+        },
+        timeout:60000
+      }
+    }).then(function(cred){
+      var raw=new Uint8Array(cred.rawId);
+      var b64=btoa(String.fromCharCode.apply(null,raw));
+      localStorage.setItem(BIO_KEY, b64);
+      toast('Face ID enabled! The app will unlock automatically next time.');
+    }).catch(function(){});
+  };
+
+  // ---- Initial routing ----
+  var credId = getBioId();
+  if(credId && bioSupported() && stored && stored.emailHash){
+    // Biometric registered — go straight to Face ID flow
+    window.tryBiometric(false);
+  } else if(stored && stored.emailHash && stored.passHash){
+    window.showPasswordForm();
+  } else {
+    setTimeout(function(){ var el=document.getElementById('su-email'); if(el) el.focus(); }, 120);
   }
 
   window.doSetup = function(){
-    var email = (document.getElementById('su-email').value||'').trim().toLowerCase();
-    var pass  = document.getElementById('su-pass').value||'';
-    var pass2 = document.getElementById('su-pass2').value||'';
-    var err   = document.getElementById('su-err');
-    err.textContent = '';
-    if(!email || !email.includes('@')){ err.textContent = 'Enter a valid email.'; return; }
-    if(pass.length < 8){ err.textContent = 'Password must be at least 8 characters.'; return; }
-    if(pass !== pass2){ err.textContent = "Passwords don't match."; return; }
-    Promise.all([sha256(email), sha256(pass)]).then(function(hashes){
-      localStorage.setItem(STORE_KEY, JSON.stringify({ emailHash: hashes[0], passHash: hashes[1] }));
+    var email=(document.getElementById('su-email').value||'').trim().toLowerCase();
+    var pass =document.getElementById('su-pass').value||'';
+    var pass2=document.getElementById('su-pass2').value||'';
+    var err  =document.getElementById('su-err');
+    err.textContent='';
+    if(!email||!email.includes('@')){ err.textContent='Enter a valid email.'; return; }
+    if(pass.length<8){ err.textContent='Password must be at least 8 characters.'; return; }
+    if(pass!==pass2){ err.textContent="Passwords don't match."; return; }
+    Promise.all([sha256(email),sha256(pass)]).then(function(hashes){
+      localStorage.setItem(STORE_KEY,JSON.stringify({ emailHash:hashes[0], passHash:hashes[1] }));
       unlockApp();
-    }).catch(function(){ err.textContent = 'Setup failed. Use HTTPS.'; });
+      offerBiometric();
+    }).catch(function(){ err.textContent='Setup failed. Use HTTPS.'; });
   };
 
   window.doLogin = function(){
-    var stored2 = getStored();
-    if(!stored2){ return; }
-    var email = (document.getElementById('li-email').value||'').trim().toLowerCase();
-    var pass  = document.getElementById('li-pass').value||'';
-    var err   = document.getElementById('li-err');
-    err.textContent = '';
-    if(!email || !pass){ err.textContent = 'Enter your email and password.'; return; }
-    Promise.all([sha256(email), sha256(pass)]).then(function(hashes){
-      if(hashes[0] === stored2.emailHash && hashes[1] === stored2.passHash){
+    var stored2=getStored(); if(!stored2) return;
+    var email=(document.getElementById('li-email').value||'').trim().toLowerCase();
+    var pass =document.getElementById('li-pass').value||'';
+    var err  =document.getElementById('li-err');
+    err.textContent='';
+    if(!email||!pass){ err.textContent='Enter your email and password.'; return; }
+    Promise.all([sha256(email),sha256(pass)]).then(function(hashes){
+      if(hashes[0]===stored2.emailHash && hashes[1]===stored2.passHash){
         unlockApp();
+        offerBiometric();
       } else {
-        err.textContent = 'Incorrect email or password.';
-        document.getElementById('li-pass').value = '';
+        err.textContent='Incorrect email or password.';
+        document.getElementById('li-pass').value='';
         document.getElementById('li-pass').focus();
       }
-    }).catch(function(){ err.textContent = 'Login failed. Use HTTPS.'; });
+    }).catch(function(){ err.textContent='Login failed. Use HTTPS.'; });
   };
 })();
 </script>
