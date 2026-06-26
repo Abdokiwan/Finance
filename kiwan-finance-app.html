@@ -633,16 +633,46 @@
     display:inline-block;animation:spin .7s linear infinite;vertical-align:-4px;}
   @keyframes spin{to{transform:rotate(360deg)}}
 
-  /* ---------- MONTH SELECTOR ---------- */
-  .month-scroll{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;
-    -webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;}
-  .month-scroll::-webkit-scrollbar{display:none;}
-  .month-chip{flex:0 0 auto;padding:7px 16px;border-radius:20px;
-    border:1px solid var(--line);background:var(--card);
-    color:var(--muted);font-family:var(--mono);font-size:12px;font-weight:700;
-    cursor:pointer;transition:.15s;white-space:nowrap;scroll-snap-align:start;}
-  .month-chip:active{transform:scale(.95);}
-  .month-chip.active{background:rgba(61,214,106,.14);border-color:rgba(61,214,106,.5);color:var(--green);}
+  /* ---------- METEOR CANVAS ---------- */
+  #meteorCanvas{position:fixed;inset:0;width:100%;height:100%;
+    pointer-events:none;z-index:0;}
+
+  /* ---------- MONTH PICKER BUTTON ---------- */
+  .month-pick-row{display:flex;align-items:center;margin-bottom:14px;}
+  .month-pick-btn{display:inline-flex;align-items:center;gap:8px;
+    padding:9px 18px;background:var(--card);border:1px solid var(--line);
+    border-radius:24px;color:var(--txt);font-family:var(--mono);
+    font-size:13px;font-weight:700;cursor:pointer;
+    transition:background .18s,border-color .18s,transform .12s;}
+  .month-pick-btn:active{transform:scale(.96);background:rgba(255,255,255,.07);}
+  .month-pick-btn .cal-icon{stroke:var(--green);}
+  .month-pick-btn .chev{stroke:var(--muted);transition:transform .25s;}
+  .month-pick-btn.open .chev{transform:rotate(180deg);}
+
+  /* ---------- MONTH PICKER BOTTOM SHEET ---------- */
+  .mp-overlay{position:fixed;inset:0;z-index:820;
+    background:rgba(0,0,0,.55);backdrop-filter:blur(4px);
+    display:flex;align-items:flex-end;justify-content:center;
+    opacity:0;pointer-events:none;transition:opacity .25s;}
+  .mp-overlay.active{opacity:1;pointer-events:auto;}
+  .mp-sheet{width:100%;max-width:480px;background:#151c1e;
+    border:1px solid var(--line);border-bottom:none;
+    border-radius:24px 24px 0 0;padding:12px 20px 40px;
+    transform:translateY(100%);
+    transition:transform .32s cubic-bezier(.2,.8,.2,1);}
+  .mp-overlay.active .mp-sheet{transform:translateY(0);}
+  .mp-handle{width:40px;height:4px;background:rgba(255,255,255,.15);
+    border-radius:4px;margin:0 auto 18px;}
+  .mp-title{font-size:11px;font-weight:800;letter-spacing:2.5px;
+    text-transform:uppercase;color:var(--muted);margin-bottom:16px;text-align:center;}
+  .mp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .mp-chip{padding:12px 8px;border-radius:14px;border:1px solid var(--line);
+    background:transparent;color:var(--txt);font-family:var(--mono);
+    font-size:13px;font-weight:600;cursor:pointer;text-align:center;
+    transition:all .18s;}
+  .mp-chip:active{transform:scale(.94);}
+  .mp-chip.active{background:rgba(61,214,106,.15);
+    border-color:rgba(61,214,106,.55);color:var(--green);font-weight:800;}
 
   /* ---------- 5 BALANCE CARDS (last odd card goes full-width) ---------- */
   .balgrid .balcard:last-child:nth-child(odd){grid-column:1 / -1;}
@@ -734,6 +764,7 @@
 </style>
 </head>
 <body>
+<canvas id="meteorCanvas" aria-hidden="true"></canvas>
 <!-- ===== LOGIN WALL ===== -->
 <div id="loginWall">
   <div class="lw-box">
@@ -809,8 +840,16 @@
     <div class="brand">Finance Tracker</div>
     <div class="sub" id="todayline"></div>
 
-    <!-- MONTH SELECTOR -->
-    <div class="month-scroll" id="monthScroll"></div>
+    <!-- MONTH PICKER BUTTON -->
+    <div class="month-pick-row">
+      <button class="month-pick-btn" id="monthPickBtn" onclick="openMonthPicker()">
+        <svg class="cal-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        <span id="monthPickLbl">This Month</span>
+        <svg class="chev" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+    </div>
 
     <!-- HERO: remaining (with avg inside, right) -->
     <div class="hero" id="hero">
@@ -969,6 +1008,15 @@
       <div class="modal-actions" style="margin-top:16px">
         <button class="m-save" onclick="closeBreakdown()">Close</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ===== MONTH PICKER BOTTOM SHEET ===== -->
+  <div id="monthPickerModal" class="mp-overlay" onclick="if(event.target===this)closeMonthPicker()">
+    <div class="mp-sheet">
+      <div class="mp-handle"></div>
+      <div class="mp-title">Select Month</div>
+      <div class="mp-grid" id="mpGrid"></div>
     </div>
   </div>
 
@@ -1148,21 +1196,131 @@ loadBalances(null);
 loadMemory();
 
 /* ============ MONTH SELECTOR ============ */
+var _mpMonths = [];
+
 function renderMonthChips(months, active) {
-  var scroll = document.getElementById('monthScroll');
-  if(!scroll) return;
-  scroll.innerHTML = '';
-  months.forEach(function(m) {
-    var b = document.createElement('button');
-    b.className = 'month-chip' + (m === active ? ' active' : '');
-    b.textContent = m;
-    b.onclick = function() { loadBalances(m); };
-    scroll.appendChild(b);
-  });
-  // Scroll selected chip into view
-  var el = scroll.querySelector('.month-chip.active');
-  if(el) setTimeout(function(){ el.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'}); }, 120);
+  _mpMonths = months || [];
+  // Update the picker button label
+  var lbl = document.getElementById('monthPickLbl');
+  if(lbl) lbl.textContent = active || 'This Month';
+  // Rebuild the grid inside the bottom sheet
+  var grid = document.getElementById('mpGrid');
+  if(!grid) return;
+  grid.innerHTML = _mpMonths.map(function(m){
+    return '<button class="mp-chip' + (m === active ? ' active' : '') +
+      '" onclick="selectMonth(\'' + esc(m) + '\')">' + esc(m) + '</button>';
+  }).join('');
 }
+
+function openMonthPicker() {
+  document.getElementById('monthPickerModal').classList.add('active');
+  var btn = document.getElementById('monthPickBtn');
+  if(btn) btn.classList.add('open');
+}
+
+function closeMonthPicker() {
+  document.getElementById('monthPickerModal').classList.remove('active');
+  var btn = document.getElementById('monthPickBtn');
+  if(btn) btn.classList.remove('open');
+}
+
+function selectMonth(m) {
+  closeMonthPicker();
+  loadBalances(m);
+}
+
+/* ========== METEOR SHOWER ========== */
+(function(){
+  var canvas = document.getElementById('meteorCanvas');
+  if(!canvas || !canvas.getContext) return;
+  var ctx = canvas.getContext('2d');
+  var W = 0, H = 0;
+
+  function resize(){
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function Meteor(){
+    this.reset();
+  }
+  Meteor.prototype.reset = function(){
+    // Spawn along the top or right edge
+    if(Math.random() < 0.65){
+      this.x = Math.random() * (W * 1.4);
+      this.y = -10;
+    } else {
+      this.x = W + 10;
+      this.y = Math.random() * H * 0.55;
+    }
+    this.speed = 4 + Math.random() * 7;
+    // angle: mostly lower-left, slight variance
+    this.angle = Math.PI * (0.58 + Math.random() * 0.16);
+    this.len   = 70 + Math.random() * 130;
+    this.w     = 0.8 + Math.random() * 1.8;
+    this.alpha = 0.35 + Math.random() * 0.45;
+    // teal/white colour mix
+    this.r = 160 + Math.floor(Math.random() * 95);
+    this.g = 210 + Math.floor(Math.random() * 45);
+    this.b = 255;
+  };
+  Meteor.prototype.step = function(){
+    this.x += Math.cos(this.angle) * this.speed;
+    this.y += Math.sin(this.angle) * this.speed;
+    return (this.x > W + 60 || this.y > H + 60);
+  };
+  Meteor.prototype.draw = function(){
+    var tx = this.x - Math.cos(this.angle) * this.len;
+    var ty = this.y - Math.sin(this.angle) * this.len;
+    // tail gradient
+    var g = ctx.createLinearGradient(tx, ty, this.x, this.y);
+    g.addColorStop(0, 'rgba(' + this.r + ',' + this.g + ',' + this.b + ',0)');
+    g.addColorStop(0.65,'rgba(' + this.r + ',' + this.g + ',' + this.b + ',' + (this.alpha * 0.45) + ')');
+    g.addColorStop(1,   'rgba(' + this.r + ',' + this.g + ',' + this.b + ',' + this.alpha + ')');
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(this.x, this.y);
+    ctx.strokeStyle = g;
+    ctx.lineWidth   = this.w;
+    ctx.lineCap     = 'round';
+    ctx.stroke();
+    // glowing head
+    var glow = ctx.createRadialGradient(
+      this.x, this.y, 0,
+      this.x, this.y, this.w * 5
+    );
+    glow.addColorStop(0, 'rgba(' + this.r + ',' + this.g + ',' + this.b + ',' + this.alpha + ')');
+    glow.addColorStop(1, 'rgba(' + this.r + ',' + this.g + ',' + this.b + ',0)');
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.w * 5, 0, Math.PI * 2);
+    ctx.fillStyle = glow;
+    ctx.fill();
+  };
+
+  var meteors  = [];
+  var MAX      = 5;
+  var frame    = 0;
+  var nextSpawn = 80 + Math.floor(Math.random() * 80);
+
+  function loop(){
+    ctx.clearRect(0, 0, W, H);
+    frame++;
+    if(frame >= nextSpawn && meteors.length < MAX){
+      meteors.push(new Meteor());
+      frame = 0;
+      nextSpawn = 60 + Math.floor(Math.random() * 100);
+    }
+    meteors = meteors.filter(function(m){
+      var done = m.step();
+      if(!done) m.draw();
+      return !done;
+    });
+    requestAnimationFrame(loop);
+  }
+  loop();
+})();
 
 /* ============ MONTHLY SUMMARY (inline) ============ */
 function renderMonthlySummary(incomeData, expenseData, month) {
