@@ -272,6 +272,12 @@ function doGet(e) {
     var reqMonth  = (e && e.parameter && e.parameter.month) ? e.parameter.month : null;
     var thisMonth = reqMonth || Utilities.formatDate(new Date(), tz, "MMMM");
 
+    // Sync the selected month to Dashboard!A7 so the sheet reflects the app's view
+    if(reqMonth) {
+      var dashSh = ss.getSheetByName("Dashboard");
+      if(dashSh) dashSh.getRange("A7").setValue(reqMonth);
+    }
+
     var balances  = computeAccountBalances_(ss);
     var totals    = computeMonthTotals_(ss, thisMonth);
     var breakdown = computeMonthBreakdown_(ss, thisMonth);
