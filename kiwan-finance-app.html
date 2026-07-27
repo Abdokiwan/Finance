@@ -438,6 +438,17 @@
     border-radius:22px 22px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom));
     animation:slideup .3s cubic-bezier(.2,.8,.2,1);}
   @keyframes slideup{from{transform:translateY(40px);opacity:.5}to{transform:none;opacity:1}}
+
+  /* Breakdown modal (In/Out details) anchors near the top and fills
+     most of the screen instead of the bottom-sheet style used for the
+     short edit/voice forms — category lists are long enough that a
+     small bottom sheet left a big empty gap above it. */
+  #breakdownModal{align-items:flex-start;}
+  #breakdownModal .modal{margin-top:calc(env(safe-area-inset-top, 0px) + 28px);
+    border-radius:22px;max-height:calc(100vh - env(safe-area-inset-top, 0px) - 56px);
+    display:flex;flex-direction:column;padding-bottom:calc(20px + env(safe-area-inset-bottom));}
+  #breakdownModal #breakdownBody{overflow-y:auto;flex:1;}
+
   .modal-head{font-size:16px;font-weight:700;margin-bottom:16px;color:var(--txt);}
   .m-field{margin-bottom:13px;}
   .m-field label{display:block;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
