@@ -1,6 +1,15 @@
 /***********************************************************************
- *  FINANCE QUICK-ENTRY + BALANCES + AI ASK (Gemini)
- *  Kiwan's Finance Tracker — web app backend
+ *  FINANCE QUICK-ENTRY  +  BALANCES  +  AI ASK (Gemini)
+ *  Kiwan's Finance Tracker
+ *  Sheet ID: 1kwogE9AbLV5tQAPkni_HvgMjIFxdTh-B89vVAm1KCF0
+ *
+ *  STEP: set your Gemini key in Script Properties, NOT here — this repo
+ *  is public, so anything pasted into this file is visible to anyone,
+ *  forever (git history keeps it even after a later edit removes it).
+ *    Apps Script editor → Project Settings → Script properties → Add:
+ *      GEMINI_API_KEY = <your real key from aistudio.google.com/apikey>
+ *    Optional overrides (all have safe defaults if unset):
+ *      GEMINI_MODEL, MONTHLY_LIMIT
  *
  *  Single source of truth: the "Cash" and "Dollar" sheets (the raw
  *  ledger). Everything else (Available Balance, Net Worth, Loans,
@@ -19,12 +28,6 @@
  *  every .gs file in a project shares one global scope, so that works
  *  without duplicating anything. Do not add another doGet/doPost, or a
  *  second copy of any function already defined here, anywhere else.
- *
- *  SECRETS: Gemini API key lives in Script Properties, never in code.
- *    Apps Script editor → Project Settings → Script properties → Add:
- *      GEMINI_API_KEY = <your real key>
- *    Optional overrides (all have safe defaults if unset):
- *      GEMINI_MODEL, MONTHLY_LIMIT
  ***********************************************************************/
 
 // ============================================================
