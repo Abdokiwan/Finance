@@ -1,33 +1,49 @@
 # Finance
 
-Kiwan's Finance Tracker — a Google Apps Script backend (`Code.gs`) bound to
-the `kiwan_finance_tracker` Google Sheet, and a single-page web app
-(`kiwan-finance-app.html`) that talks to it over JSONP.
+Kiwan's Finance Tracker — a Google Apps Script backend bound to the
+`kiwan_finance_tracker` Google Sheet, split across two files, and a
+single-page web app (`kiwan-finance-app.html`) that talks to it over
+JSONP.
 
 ## Architecture
 
+- **Two files, one job each.**
+  - `FinanceEntry.gs` is the web app: the **only** `doGet`/`doPost` in
+    the project, all balance/totals calculations, the Finance-sheet
+    label lookups, and the Gemini AI ask/voice/memory endpoints.
+  - `Code.gs` is sheet-side automation only: the `onEdit` trigger (auto
+    date/month fill, Cash↔Dollar sync rows) and the Dashboard Tools menu.
+    It has no `doGet`/`doPost` and calls shared helpers
+    (`getCashColMap_`, `getDollarColMap_`, etc.) that live in
+    `FinanceEntry.gs` — every `.gs` file in an Apps Script project
+    shares one global scope, so this works without any import, as long
+    as a given function name is defined in exactly one of the two files.
+  - **Never let both files define `doGet`/`doPost`** (or duplicate any
+    other function name). That's exactly what used to make the API
+    silently serve the wrong JSON schema, depending on which file Apps
+    Script happened to load last.
 - **Single source of truth**: the `Cash` and `Dollar` sheets (raw ledgers).
   All balances, income/expense totals, and breakdowns are computed from
   these rows — never hardcoded.
 - **Summary figures** (Available Balance, Net Worth, Assets, Loans/Debt,
-  Dollar price) are read from the `Finance` and `Net worth` sheets by
-  searching for their label text (e.g. "NET WORTH"), not a fixed cell
-  address, so the API keeps working if the sheet layout shifts.
-- **One `doGet` / one `doPost`.** There used to be a second, conflicting
-  copy of both in `FinanceEntry.gs`; that file has been merged into
-  `Code.gs` and removed. Do not add a second `doGet`/`doPost` anywhere —
-  Apps Script silently lets the last-loaded one win, which is what caused
-  the API to intermittently return the wrong schema.
-- **Account aliases** (`ACCOUNT_ALIASES` in `Code.gs`) are the one place
-  that merges account-name variants in the Cash sheet (`NBE`, `NBE/Insta`,
-  `Insta` all merge to the `Insta` display key, since NBE and Insta are
-  the same physical account).
+  Dollar price, account balances) are read from the `Finance` and
+  `Net worth` sheets by searching for their label text (e.g. "NET WORTH",
+  "NBE/Insta"), not a fixed cell address, so the API keeps working if the
+  sheet layout shifts — with the bottom-up ledger computation as a
+  fallback if a label can't be found.
+- **Account aliases** (`ACCOUNT_ALIASES` in `FinanceEntry.gs`) are the one
+  place that merges account-name variants in the Cash sheet (`NBE`,
+  `NBE/Insta`, `Insta` all merge to the `Insta` display key, since NBE and
+  Insta are the same physical account).
+- **Month sync**: opening the app with no month explicitly selected shows
+  whatever `Dashboard!A7` currently says; picking a month in the app (or
+  the sheet) keeps the other side in sync.
 
 ## Setup (Apps Script)
 
 1. Open the Apps Script project bound to the spreadsheet.
-2. Make sure `Code.gs` is the **only** file with the ledger logic (delete
-   any other copy of `doGet`/`doPost` if one exists).
+2. Make sure the project has exactly these two files — `Code.gs` and
+   `FinanceEntry.gs` — with no other copy of `doGet`/`doPost` anywhere.
 3. Project Settings ▸ **Script properties** ▸ add:
    - `GEMINI_API_KEY` — your real Gemini API key (never commit this).
    - `GEMINI_MODEL` — optional, defaults to `gemini-2.5-flash`.
