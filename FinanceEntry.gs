@@ -480,52 +480,68 @@ function computeLoansTotal_(ss) {
   return total;
 }
 
-/* Income/expense "In"/"Out" breakdown sourced directly from the "Main
- * Categories" sheet, instead of computed bottom-up from the Cash
- * ledger. That sheet lists "Income" with its detail rows (Paycheck,
- * Payback, Side Income, ...) flat underneath it, then "Expenses" with
- * main categories (Bills, Food, Drinks, ...) each followed by their own
- * "* Detail" rows — the exact { MainCat: { total, items } } shape the
- * app's breakdown already uses. Detail rows are marked with a leading
- * "*"; everything else is either a main-category header or one of the
- * "Totals"/"Income"/"Expenses" section markers.
+/* Income/expense "In"/"Out" breakdown sourced from the "Avg" sheet,
+ * which has one column per calendar month (January..December) plus a
+ * trailing "Avg" column — unlike the Main Categories/Finance sheets,
+ * which only ever describe whichever month is currently "live", this
+ * lets the app show a category breakdown for ANY month, driven by the
+ * app's existing month picker (no new UI needed).
  *
- * Like the Finance sheet's "THIS MONTH" box, this sheet's own header
- * names a single month (e.g. "July") — it isn't a per-row ledger — so
- * callers should only use this for the live current month and fall
- * back to computeMonthBreakdown_ for any other month. Returns null if
- * the sheet is missing or too short, so callers can fall back cleanly.
+ * Row layout matches Main Categories: "Income" followed by its flat
+ * "* Detail" rows, then "Expenses" as main categories (Bills, Food,
+ * ...) each followed by their own "* Detail" rows, ending at the
+ * "sum" row (before the sheet's second, chart-data table below it).
+ * The sheet spells April as "Abril", handled via MONTH_ALIASES.
+ *
+ * KNOWN DATA-QUALITY CAVEAT (sheet-side, not fixable from here): this
+ * sheet's Income column appears to require an exact category-text
+ * match, so it misses at least one real spelling variant used in the
+ * Cash sheet ("Parents Support" vs "Parental Support") — e.g. its July
+ * total undercounts by exactly that amount vs the Finance/Main
+ * Categories tabs. Expenses aren't affected. Mirrored faithfully as
+ * requested; computeMonthBreakdown_ (bottom-up from the ledger) is the
+ * accurate alternative if that matters more than matching this sheet.
+ *
+ * Returns null if the sheet, the month's column, or any real data for
+ * it can't be found, so callers can fall back to the ledger breakdown.
  */
-function getMainCategoriesBreakdown_(ss) {
-  var sh = ss.getSheetByName("Main Categories");
+function getAvgSheetBreakdown_(ss, monthName) {
+  var sh = ss.getSheetByName("Avg");
   if (!sh) return null;
   var lr = sh.getLastRow();
   if (lr < 3) return null;
   var lc = sh.getLastColumn();
 
-  // Find the "Actual" column by header text; column C is this sheet's
-  // usual layout (name, blank, Actual, Planned, Diff.) if not found.
-  var actualCol = 3;
-  var headerScan = sh.getRange(1, 1, Math.min(5, lr), lc).getValues();
+  var MONTH_ALIASES = { "abril": "april", "noc": "november" };
+  var norm = function(s) {
+    s = String(s || "").trim().toLowerCase();
+    return MONTH_ALIASES[s] || s;
+  };
+  var wantMonth = norm(monthName);
+
+  var monthCol = -1;
+  var headerScan = sh.getRange(1, 1, Math.min(3, lr), lc).getValues();
   headerFind:
   for (var hr = 0; hr < headerScan.length; hr++) {
     for (var hc = 0; hc < headerScan[hr].length; hc++) {
-      if (String(headerScan[hr][hc] || "").trim().toLowerCase() === "actual") {
-        actualCol = hc + 1;
-        break headerFind;
-      }
+      if (norm(headerScan[hr][hc]) === wantMonth) { monthCol = hc + 1; break headerFind; }
     }
   }
+  if (monthCol === -1) return null;
 
-  var vals = sh.getRange(1, 1, lr, actualCol).getValues();
+  var vals = sh.getRange(1, 1, lr, monthCol).getValues();
   var income = {}, expense = {};
-  var section = null;         // "income" | "expense" | null
+  var section = null;
   var currentMainCat = null;
+  var foundAnyItem = false;
 
-  vals.forEach(function(r) {
-    var rawName = String(r[0] || "").trim();
-    if (!rawName) return;
-    var amt = parseMoneyCell_(r[actualCol - 1]);
+  for (var r = 0; r < vals.length; r++) {
+    var rawName = String(vals[r][0] || "").trim();
+    if (!rawName) continue;
+    var nameLower0 = rawName.toLowerCase();
+    if (nameLower0 === "sum") break; // stop before the second (chart) table
+
+    var amt = parseMoneyCell_(vals[r][monthCol - 1]);
     if (isNaN(amt)) amt = 0;
 
     var isDetail = rawName.indexOf("*") === 0;
@@ -533,29 +549,34 @@ function getMainCategoriesBreakdown_(ss) {
     var nameL = name.toLowerCase();
 
     if (!isDetail) {
-      if (nameL === "totals") return;
       if (nameL === "income") {
         section = "income";
         currentMainCat = "Income";
         income[currentMainCat] = { total: Math.abs(amt), items: {} };
-        return;
+        continue;
       }
       if (nameL === "expenses" || nameL === "expense") {
         section = "expense";
         currentMainCat = null;
-        return;
+        continue;
       }
       if (section === "expense") {
         currentMainCat = name;
         expense[currentMainCat] = { total: Math.abs(amt), items: {} };
       }
-      return;
+      continue;
     }
 
-    if (amt === 0 || !currentMainCat) return;
+    if (amt === 0 || !currentMainCat) continue;
+    foundAnyItem = true;
     if (section === "income")  income[currentMainCat].items[name]  = Math.abs(amt);
     if (section === "expense") expense[currentMainCat].items[name] = Math.abs(amt);
-  });
+  }
+
+  // No real transactions found for this month's column (e.g. a future
+  // month the sheet hasn't populated yet) -> let the caller fall back
+  // to the ledger instead of showing a misleadingly empty breakdown.
+  if (!foundAnyItem) return null;
 
   return { income: income, expense: expense };
 }
@@ -640,6 +661,16 @@ function handleGet_(e, cb) {
     var avgSpend  = computeAvgSpend_(ss);
     var allMonths = getAvailableMonths_(ss);
 
+    // The "Avg" sheet has one column per calendar month, so the In/Out
+    // breakdown can be sourced from it for whichever month is being
+    // browsed, not just the live one — falls back to the ledger-computed
+    // breakdown above if that month's column isn't found/populated.
+    var avgBreakdown = getAvgSheetBreakdown_(ss, thisMonth);
+    if (avgBreakdown) {
+      Logger.log("handleGet_: sourcing income/expense breakdown from Avg sheet for " + thisMonth);
+      breakdown = avgBreakdown;
+    }
+
     // The Finance sheet's "THIS MONTH" box (Income This Month / Total
     // Expenses / Saved) only describes the live current month, so it
     // only overrides the ledger totals when that's the month being
@@ -658,14 +689,6 @@ function handleGet_(e, cb) {
       if (incomeOverride  !== null) totals.income  = incomeOverride;
       if (expenseOverride !== null) totals.expense = expenseOverride;
       totals.saved = (savedOverride !== null) ? savedOverride : (totals.income - totals.expense);
-
-      // Same reasoning: the "Main Categories" sheet's In/Out breakdown
-      // also only ever describes the live current month.
-      var mainCatBreakdown = getMainCategoriesBreakdown_(ss);
-      if (mainCatBreakdown) {
-        Logger.log("handleGet_: overriding income/expense breakdown with Main Categories sheet");
-        breakdown = mainCatBreakdown;
-      }
     }
 
     var dollarHoldingsOverride = getFinanceValue_(ss, ["dollar holdings"]);
@@ -1295,12 +1318,13 @@ function testFinanceOverrides() {
   }, null, 2));
 }
 
-function testMainCategoriesBreakdown() {
+function testAvgSheetBreakdown() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var tz = ss.getSpreadsheetTimeZone();
-  var thisMonth = Utilities.formatDate(new Date(), tz, "MMMM");
-  Logger.log(JSON.stringify({
-    ledgerBreakdown:      computeMonthBreakdown_(ss, thisMonth),
-    mainCategoriesSheet:  getMainCategoriesBreakdown_(ss)
-  }, null, 2));
+  var months = ["January","February","March","April","May","June","July",
+                "August","September","October","November","December"];
+  var out = {};
+  months.forEach(function(m) {
+    out[m] = getAvgSheetBreakdown_(ss, m);
+  });
+  Logger.log(JSON.stringify(out, null, 2));
 }
