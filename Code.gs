@@ -157,6 +157,62 @@ function findLabeledValue_(sheet, labels, maxRows, maxCols) {
   return null;
 }
 
+/* Some Finance-sheet sections are a row of side-by-side header cells
+ * (e.g. "NBE/Insta | HSBC | Cash") with the values directly beneath
+ * each header on the next row, not to the right of it. findLabeledValue_
+ * would grab the neighboring box's header text by mistake in that
+ * layout (it looks right before it looks down), so this looks strictly
+ * one row straight down from the matching label. Label text is
+ * normalized (case, whitespace, slashes stripped) so "NBE/ INSTA",
+ * "NBE/Insta", "NBE / INSTA" etc. all match the same way. */
+function findValueBelowLabel_(sheet, labels, maxRows, maxCols) {
+  if (!sheet) return null;
+  var lr = Math.min(sheet.getLastRow(), maxRows || 60);
+  var lc = Math.min(sheet.getLastColumn(), maxCols || 60);
+  if (lr < 2 || lc < 1) return null;
+  var vals = sheet.getRange(1, 1, lr, lc).getValues();
+  var norm = function(s) { return String(s || "").toLowerCase().replace(/[\s\/]/g, ""); };
+  var wanted = labels.map(norm);
+  for (var r = 0; r < vals.length - 1; r++) {
+    for (var c = 0; c < vals[r].length; c++) {
+      var cell = norm(vals[r][c]);
+      if (!cell || wanted.indexOf(cell) === -1) continue;
+      var below = vals[r + 1][c];
+      if (below !== "" && below !== null) return below;
+    }
+  }
+  return null;
+}
+
+/* NBE/Insta running balance, read straight from the Finance sheet's
+ * "ACCOUNT BALANCES" box (Finance!AA19 as of this writing) instead of
+ * the bottom-up Cash-ledger sum. The ledger sum tracked this cell to
+ * within ~0.05% (most likely the Finance tab's snapshot lagging the
+ * very latest Cash edits by a few minutes) but the user wants this
+ * specific cell mirrored exactly, so it takes priority. Located by the
+ * "NBE/Insta" label directly above it first (survives the sheet being
+ * reorganized); falls back to a literal AA19 read, then to the ledger
+ * sum if neither is available. */
+function getInstaBalanceOverride_(ss) {
+  var fin = ss.getSheetByName("Finance");
+  if (!fin) return null;
+  var v = findValueBelowLabel_(fin, ["NBE/Insta", "NBE / INSTA", "NBE/ INSTA"]);
+  if (v === null || v === "") {
+    try { v = fin.getRange("AA19").getValue(); } catch (e) { v = null; }
+  }
+  var n = parseMoneyCell_(v);
+  return isNaN(n) ? null : n;
+}
+
+/* Parses a cell that may be a live number OR currency-formatted text
+ * (e.g. "118,927.88 EGP") into a plain number. */
+function parseMoneyCell_(v) {
+  if (typeof v === "number") return v;
+  if (v === null || v === undefined || v === "") return NaN;
+  var cleaned = String(v).replace(/[^0-9.\-]/g, "");
+  return cleaned ? Number(cleaned) : NaN;
+}
+
 // ============================================================
 // CENTRALIZED BALANCE / TOTALS CALCULATIONS (Cash sheet = truth)
 // ============================================================
@@ -445,16 +501,33 @@ function handleGet_(e, cb) {
   } else {
     // Default: balances + month summary. Accepts optional ?month=June.
     var tz = ss.getSpreadsheetTimeZone();
-    var reqMonth  = (e && e.parameter && e.parameter.month) ? e.parameter.month : null;
-    var thisMonth = reqMonth || Utilities.formatDate(new Date(), tz, "MMMM");
+    var reqMonth = (e && e.parameter && e.parameter.month) ? e.parameter.month : null;
+    var dashSh = ss.getSheetByName("Dashboard");
+    var dashMonth = dashSh ? String(dashSh.getRange("A7").getValue() || "").trim() : "";
 
-    // Sync the selected month to Dashboard!A7 so the sheet reflects the app's view
+    var thisMonth;
     if (reqMonth) {
-      var dashSh = ss.getSheetByName("Dashboard");
+      // The app explicitly asked for a month (user tapped a month chip)
+      // -> that wins, and we push it back so Dashboard!A7 matches the
+      // app's current view.
+      thisMonth = reqMonth;
       if (dashSh) dashSh.getRange("A7").setValue(reqMonth);
+    } else if (dashMonth) {
+      // No month requested -> follow whatever Dashboard!A7 already says,
+      // so opening the app always reflects the sheet's selected month.
+      thisMonth = dashMonth;
+    } else {
+      thisMonth = Utilities.formatDate(new Date(), tz, "MMMM");
     }
 
-    var balances       = computeAccountBalances_(ss);
+    var balances = computeAccountBalances_(ss);
+    var instaOverride = getInstaBalanceOverride_(ss);
+    if (instaOverride !== null) {
+      Logger.log("handleGet_: overriding Insta balance with Finance-sheet value " +
+        instaOverride + " (ledger sum was " + (balances["Insta"] || 0) + ")");
+      balances["Insta"] = instaOverride;
+    }
+
     var totals         = computeMonthTotals_(ss, thisMonth);
     var breakdown      = computeMonthBreakdown_(ss, thisMonth);
     var avgSpend       = computeAvgSpend_(ss);
@@ -1255,5 +1328,19 @@ function testWealthSummary() {
     dollarPrice: getDollarPrice_(ss),
     netWorth:    computeNetWorthAssets_(ss),
     loans:       computeLoansTotal_(ss)
+  }, null, 2));
+}
+
+function testInstaOverrideAndMonthSync() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ledgerInsta = (computeAccountBalances_(ss)["Insta"] || 0);
+  var override = getInstaBalanceOverride_(ss);
+  var dashSh = ss.getSheetByName("Dashboard");
+  var dashMonth = dashSh ? String(dashSh.getRange("A7").getValue() || "").trim() : "(no Dashboard sheet)";
+  Logger.log(JSON.stringify({
+    ledgerInsta:        ledgerInsta,
+    financeAA19Override: override,
+    usedValue:          (override !== null ? override : ledgerInsta),
+    dashboardA7Month:   dashMonth
   }, null, 2));
 }
