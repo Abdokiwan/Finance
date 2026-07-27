@@ -1,9 +1,11 @@
 # Finance
 
-Kiwan's Finance Tracker — a Google Apps Script backend bound to the
-`kiwan_finance_tracker` Google Sheet, split across two files, and a
-single-page web app (`kiwan-finance-app.html`) that talks to it over
-JSONP.
+Kiwan's Finance Tracker — a single-page web app (`kiwan-finance-app.html`)
+that talks over JSONP to a Google Apps Script backend bound to the
+`kiwan_finance_tracker` Google Sheet. The Apps Script source (`Code.gs` /
+`FinanceEntry.gs`) is maintained directly in the Apps Script editor and is
+**not tracked in this repository** — the notes below describe how that
+backend is organized and behaves, for reference when editing it there.
 
 ## Architecture
 
@@ -42,8 +44,9 @@ JSONP.
 ## Setup (Apps Script)
 
 1. Open the Apps Script project bound to the spreadsheet.
-2. Make sure the project has exactly these two files — `Code.gs` and
-   `FinanceEntry.gs` — with no other copy of `doGet`/`doPost` anywhere.
+2. Make sure the project has exactly two files, `Code.gs` and
+   `FinanceEntry.gs` (organized as described above), with no other copy
+   of `doGet`/`doPost` anywhere.
 3. Project Settings ▸ **Script properties** ▸ add:
    - `GEMINI_API_KEY` — your real Gemini API key (never commit this).
    - `GEMINI_MODEL` — optional, defaults to `gemini-2.5-flash`.
