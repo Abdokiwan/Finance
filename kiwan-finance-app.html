@@ -1042,13 +1042,13 @@
 
 <script>
 /* ============ CONFIG ============ */
-// ⚙️ PASTE your Apps Script Web App URL here after deploying (Step 2):
-// IMPORTANT: Code.gs was consolidated (duplicate doGet/doPost removed) —
-// after deploying a NEW VERSION of the Apps Script project (Deploy ▸
-// Manage deployments ▸ Edit ▸ new version), the /exec URL below is
-// normally unchanged UNLESS you create a brand new deployment. If you
-// create a new deployment instead of a new version, update this URL.
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyiyEZR1CA8mZa37zSF4cEbjDt2yEprkXmmuWVhiNitISn7pRoekIqe8Pu41nox8vjDIg/exec";
+// ⚙️ Apps Script Web App URL. IMPORTANT: creating a "New deployment" in
+// Apps Script (Deploy ▸ New deployment) generates a DIFFERENT /exec URL
+// from any existing one — the app keeps hitting whatever URL is below
+// until you paste in the new one. To update code without changing this
+// URL, use Deploy ▸ Manage deployments ▸ Edit (pencil) on the SAME
+// deployment ▸ Version: New version ▸ Deploy instead.
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzFu7Y1py1Vf7ehxBOJJFzN6OoLlUnaI08i_HMPqPXdtxRuFObByqUX67wO7JNSqGzTQw/exec";
 
 // All account names that appear in the Cash sheet's Account column
 // Add new accounts here if the sheet changes — no other code needs updating.
@@ -2254,11 +2254,6 @@ function saveEntry(btn){
   };
   btn.disabled=true; btn.innerHTML=`<span class="spinner"></span> Saving…`;
 
-  if(WEB_APP_URL==="https://script.google.com/macros/s/AKfycbyiyEZR1CA8mZa37zSF4cEbjDt2yEprkXmmuWVhiNitISn7pRoekIqe8Pu41nox8vjDIg/exec"){
-    // Demo mode (no backend yet)
-    setTimeout(()=>{ onSaved(payload, true); }, 700);
-    return;
-  }
   // Apps Script + static HTML: a normal fetch can't read the response (CORS),
   // so we POST in no-cors mode (fire-and-forget) and treat a completed send as success.
   fetch(WEB_APP_URL,{
