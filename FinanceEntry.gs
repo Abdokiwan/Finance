@@ -480,6 +480,86 @@ function computeLoansTotal_(ss) {
   return total;
 }
 
+/* Income/expense "In"/"Out" breakdown sourced directly from the "Main
+ * Categories" sheet, instead of computed bottom-up from the Cash
+ * ledger. That sheet lists "Income" with its detail rows (Paycheck,
+ * Payback, Side Income, ...) flat underneath it, then "Expenses" with
+ * main categories (Bills, Food, Drinks, ...) each followed by their own
+ * "* Detail" rows — the exact { MainCat: { total, items } } shape the
+ * app's breakdown already uses. Detail rows are marked with a leading
+ * "*"; everything else is either a main-category header or one of the
+ * "Totals"/"Income"/"Expenses" section markers.
+ *
+ * Like the Finance sheet's "THIS MONTH" box, this sheet's own header
+ * names a single month (e.g. "July") — it isn't a per-row ledger — so
+ * callers should only use this for the live current month and fall
+ * back to computeMonthBreakdown_ for any other month. Returns null if
+ * the sheet is missing or too short, so callers can fall back cleanly.
+ */
+function getMainCategoriesBreakdown_(ss) {
+  var sh = ss.getSheetByName("Main Categories");
+  if (!sh) return null;
+  var lr = sh.getLastRow();
+  if (lr < 3) return null;
+  var lc = sh.getLastColumn();
+
+  // Find the "Actual" column by header text; column C is this sheet's
+  // usual layout (name, blank, Actual, Planned, Diff.) if not found.
+  var actualCol = 3;
+  var headerScan = sh.getRange(1, 1, Math.min(5, lr), lc).getValues();
+  headerFind:
+  for (var hr = 0; hr < headerScan.length; hr++) {
+    for (var hc = 0; hc < headerScan[hr].length; hc++) {
+      if (String(headerScan[hr][hc] || "").trim().toLowerCase() === "actual") {
+        actualCol = hc + 1;
+        break headerFind;
+      }
+    }
+  }
+
+  var vals = sh.getRange(1, 1, lr, actualCol).getValues();
+  var income = {}, expense = {};
+  var section = null;         // "income" | "expense" | null
+  var currentMainCat = null;
+
+  vals.forEach(function(r) {
+    var rawName = String(r[0] || "").trim();
+    if (!rawName) return;
+    var amt = parseMoneyCell_(r[actualCol - 1]);
+    if (isNaN(amt)) amt = 0;
+
+    var isDetail = rawName.indexOf("*") === 0;
+    var name = isDetail ? rawName.replace(/^\*+\s*/, "").trim() : rawName;
+    var nameL = name.toLowerCase();
+
+    if (!isDetail) {
+      if (nameL === "totals") return;
+      if (nameL === "income") {
+        section = "income";
+        currentMainCat = "Income";
+        income[currentMainCat] = { total: Math.abs(amt), items: {} };
+        return;
+      }
+      if (nameL === "expenses" || nameL === "expense") {
+        section = "expense";
+        currentMainCat = null;
+        return;
+      }
+      if (section === "expense") {
+        currentMainCat = name;
+        expense[currentMainCat] = { total: Math.abs(amt), items: {} };
+      }
+      return;
+    }
+
+    if (amt === 0 || !currentMainCat) return;
+    if (section === "income")  income[currentMainCat].items[name]  = Math.abs(amt);
+    if (section === "expense") expense[currentMainCat].items[name] = Math.abs(amt);
+  });
+
+  return { income: income, expense: expense };
+}
+
 // ============================================================
 // doGet: balances + AI ask (JSONP) — the ONLY doGet in this project
 // ============================================================
@@ -578,6 +658,14 @@ function handleGet_(e, cb) {
       if (incomeOverride  !== null) totals.income  = incomeOverride;
       if (expenseOverride !== null) totals.expense = expenseOverride;
       totals.saved = (savedOverride !== null) ? savedOverride : (totals.income - totals.expense);
+
+      // Same reasoning: the "Main Categories" sheet's In/Out breakdown
+      // also only ever describes the live current month.
+      var mainCatBreakdown = getMainCategoriesBreakdown_(ss);
+      if (mainCatBreakdown) {
+        Logger.log("handleGet_: overriding income/expense breakdown with Main Categories sheet");
+        breakdown = mainCatBreakdown;
+      }
     }
 
     var dollarHoldingsOverride = getFinanceValue_(ss, ["dollar holdings"]);
@@ -1204,5 +1292,15 @@ function testFinanceOverrides() {
     loans:                    computeLoansTotal_(ss),
     avgSpend:                 computeAvgSpend_(ss),
     dashboardA7Month:         dashMonth
+  }, null, 2));
+}
+
+function testMainCategoriesBreakdown() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = ss.getSpreadsheetTimeZone();
+  var thisMonth = Utilities.formatDate(new Date(), tz, "MMMM");
+  Logger.log(JSON.stringify({
+    ledgerBreakdown:      computeMonthBreakdown_(ss, thisMonth),
+    mainCategoriesSheet:  getMainCategoriesBreakdown_(ss)
   }, null, 2));
 }
