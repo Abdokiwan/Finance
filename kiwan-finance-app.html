@@ -907,13 +907,12 @@
       <div class="balcard"><div class="balname">Visa</div><div class="balval" id="b-visa">—</div></div>
     </div>
 
-    <!-- WEALTH SUMMARY (Available Balance / Net Worth / Loans) -->
+    <!-- WEALTH SUMMARY (Available Balance / Loans) -->
     <div class="bal-head">
       <h4>Wealth summary</h4>
     </div>
     <div class="balgrid" id="wealthgrid">
       <div class="balcard"><div class="balname">Available Balance</div><div class="balval" id="b-availbal">—</div></div>
-      <div class="balcard"><div class="balname">Net Worth</div><div class="balval" id="b-networth">—</div></div>
       <div class="balcard"><div class="balname">Loans / Debt</div><div class="balval" id="b-loans">—</div></div>
     </div>
 
@@ -1098,7 +1097,7 @@ function loadBalances(month){
   var btn = document.getElementById('balrefresh');
   if(btn) btn.classList.add('spin');
   ['b-insta','b-hsbc','b-cash','b-vf','b-visamisr','b-qnb','b-visa',
-   'b-availbal','b-networth','b-loans'].forEach(function(id){
+   'b-availbal','b-loans'].forEach(function(id){
     var el=document.getElementById(id);
     if(el){ el.textContent="…"; el.className="balval loading"; }
   });
@@ -1116,7 +1115,7 @@ function loadBalances(month){
   s.onerror = function(){
     if(btn) btn.classList.remove('spin');
     ['b-insta','b-hsbc','b-cash','b-vf','b-visamisr','b-qnb','b-visa',
-     'b-availbal','b-networth','b-loans'].forEach(function(id){
+     'b-availbal','b-loans'].forEach(function(id){
       var el=document.getElementById(id); if(el){ el.textContent="—"; el.className="balval"; }
     });
     toast("⚠️ Couldn't load balances. Pull to refresh.");
@@ -1139,7 +1138,6 @@ function showBalances(d){
 
   // Wealth summary
   setBal('b-availbal',  d.available_balance);
-  setBal('b-networth',  d.net_worth);
   setBal('b-loans',     d.loans);
 
   // Month selector chips — fall back to all 12 if GAS hasn't returned available_months yet
