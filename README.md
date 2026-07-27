@@ -1,11 +1,11 @@
 # Finance
 
-Kiwan's Finance Tracker — a single-page web app (`kiwan-finance-app.html`)
-that talks over JSONP to a Google Apps Script backend bound to the
-`kiwan_finance_tracker` Google Sheet. The Apps Script source (`Code.gs` /
-`FinanceEntry.gs`) is maintained directly in the Apps Script editor and is
-**not tracked in this repository** — the notes below describe how that
-backend is organized and behaves, for reference when editing it there.
+Kiwan's Finance Tracker — a Google Apps Script backend (`Code.gs` /
+`FinanceEntry.gs`) bound to the `kiwan_finance_tracker` Google Sheet, and a
+single-page web app (`kiwan-finance-app.html`) that talks to it over
+JSONP. The Apps Script project itself is the source of truth for what's
+actually deployed — after editing either file here, paste it into the
+Apps Script editor and deploy a new version for changes to take effect.
 
 ## Architecture
 
