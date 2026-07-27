@@ -52,6 +52,21 @@ var ACCOUNT_ALIASES = {
 };
 
 /*
+ * Labels used to find each account's running balance in the Finance
+ * sheet's "ACCOUNT BALANCES" boxes (see getAccountBalanceOverride_).
+ * No QNB entry — the Finance sheet has no QNB box, so that account is
+ * always the ledger sum (currently 0, since no transactions use it yet).
+ */
+var ACCOUNT_FINANCE_LABELS = {
+  Insta: ["NBE/Insta", "NBE / INSTA", "NBE/ INSTA"],
+  HSBC:  ["HSBC"],
+  Cash:  ["CASH"],
+  VF:    ["VF"],
+  Telda: ["Telda"],
+  Visa:  ["Visa"]
+};
+
+/*
  * Categories/types that represent internal money movement (transfers
  * between own accounts, loan principal draws/repayments, currency
  * conversions) rather than real income or spending. These are EXCLUDED
@@ -129,88 +144,91 @@ function getDollarColMap_(sh) {
 
 // ============================================================
 // LABEL-BASED CELL LOOKUP — for summary sheets (Finance, Net worth)
-// whose figures live in scattered, hand-formatted cells rather than a
-// tidy header row. We search by label text instead of a fixed address
-// so the API survives the sheet being reorganized.
+// whose figures live in scattered, hand-formatted boxes rather than a
+// tidy header row. We locate values by label TEXT, not a fixed address,
+// so the API survives the sheet being reorganized. The Finance tab
+// mixes two layouts for its boxes:
+//   - label, then its number a cell or two to the RIGHT on the same
+//     row (e.g. "Income This Month | ... | 50,066.24")
+//   - several sibling labels sharing one row, each with its number
+//     directly BELOW it (e.g. "NBE/Insta | HSBC | Cash" headers, with
+//     each account's balance on the next row under its own header;
+//     merged cells can also shift the number one column left/right of
+//     its header when exported, e.g. the "CASH" box)
+// This single helper tries both, so one call handles every box on the
+// sheet without needing to know which layout a given label uses.
 // ============================================================
-function findLabeledValue_(sheet, labels, maxRows, maxCols) {
+function findLabeledNumber_(sheet, labels, maxRows, maxCols) {
   if (!sheet) return null;
-  var lr = Math.min(sheet.getLastRow(), maxRows || 60);
-  var lc = Math.min(sheet.getLastColumn(), maxCols || 40);
+  var lr = Math.min(sheet.getLastRow(), maxRows || 80);
+  var lc = Math.min(sheet.getLastColumn(), maxCols || 60);
   if (lr < 1 || lc < 1) return null;
   var vals = sheet.getRange(1, 1, lr, lc).getValues();
-  var wanted = labels.map(function(l) { return l.toLowerCase(); });
-  for (var r = 0; r < vals.length; r++) {
-    for (var c = 0; c < vals[r].length; c++) {
-      var cell = String(vals[r][c] || "").trim().toLowerCase();
-      if (!cell || wanted.indexOf(cell) === -1) continue;
-      for (var c2 = c + 1; c2 < vals[r].length; c2++) {
-        var v = vals[r][c2];
-        if (v !== "" && v !== null) return v;
-      }
-      if (r + 1 < vals.length) {
-        var below = vals[r + 1][c];
-        if (below !== "" && below !== null) return below;
-      }
-    }
-  }
-  return null;
-}
-
-/* Some Finance-sheet sections are a row of side-by-side header cells
- * (e.g. "NBE/Insta | HSBC | Cash") with the values directly beneath
- * each header on the next row, not to the right of it. findLabeledValue_
- * would grab the neighboring box's header text by mistake in that
- * layout (it looks right before it looks down), so this looks strictly
- * one row straight down from the matching label. Label text is
- * normalized (case, whitespace, slashes stripped) so "NBE/ INSTA",
- * "NBE/Insta", "NBE / INSTA" etc. all match the same way. */
-function findValueBelowLabel_(sheet, labels, maxRows, maxCols) {
-  if (!sheet) return null;
-  var lr = Math.min(sheet.getLastRow(), maxRows || 60);
-  var lc = Math.min(sheet.getLastColumn(), maxCols || 60);
-  if (lr < 2 || lc < 1) return null;
-  var vals = sheet.getRange(1, 1, lr, lc).getValues();
-  var norm = function(s) { return String(s || "").toLowerCase().replace(/[\s\/]/g, ""); };
+  var norm = function(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); };
   var wanted = labels.map(norm);
-  for (var r = 0; r < vals.length - 1; r++) {
+
+  for (var r = 0; r < vals.length; r++) {
     for (var c = 0; c < vals[r].length; c++) {
       var cell = norm(vals[r][c]);
       if (!cell || wanted.indexOf(cell) === -1) continue;
-      var below = vals[r + 1][c];
-      if (below !== "" && below !== null) return below;
+
+      // 1) same row, scanning right: first numeric cell wins. Stop as
+      //    soon as we hit ANY other non-empty cell that isn't numeric
+      //    (a sibling box's label) so we never walk into the wrong box.
+      for (var c2 = c + 1; c2 < vals[r].length; c2++) {
+        var n1 = parseMoneyCell_(vals[r][c2]);
+        if (!isNaN(n1)) return n1;
+        if (vals[r][c2] !== "" && vals[r][c2] !== null) break;
+      }
+
+      // 2) one or two rows below, same column ±1 (absorbs the
+      //    occasional merged-cell column shift).
+      for (var dr = 1; dr <= 2; dr++) {
+        var rr = r + dr;
+        if (rr >= vals.length) break;
+        for (var dc = -1; dc <= 1; dc++) {
+          var cc = c + dc;
+          if (cc < 0 || cc >= vals[rr].length) continue;
+          var n2 = parseMoneyCell_(vals[rr][cc]);
+          if (!isNaN(n2)) return n2;
+        }
+      }
     }
   }
   return null;
 }
 
-/* NBE/Insta running balance, read straight from the Finance sheet's
- * "ACCOUNT BALANCES" box (Finance!AA19 as of this writing) instead of
- * the bottom-up Cash-ledger sum. The ledger sum tracked this cell to
- * within ~0.05% (most likely the Finance tab's snapshot lagging the
- * very latest Cash edits by a few minutes) but the user wants this
- * specific cell mirrored exactly, so it takes priority. Located by the
- * "NBE/Insta" label directly above it first (survives the sheet being
- * reorganized); falls back to a literal AA19 read, then to the ledger
- * sum if neither is available. */
-function getInstaBalanceOverride_(ss) {
-  var fin = ss.getSheetByName("Finance");
-  if (!fin) return null;
-  var v = findValueBelowLabel_(fin, ["NBE/Insta", "NBE / INSTA", "NBE/ INSTA"]);
-  if (v === null || v === "") {
-    try { v = fin.getRange("AA19").getValue(); } catch (e) { v = null; }
-  }
-  var n = parseMoneyCell_(v);
-  return isNaN(n) ? null : n;
-}
-
 /* Parses a cell that may be a live number OR currency-formatted text
- * (e.g. "118,927.88 EGP") into a plain number. */
+ * (e.g. "118,927.88 EGP", "-£210.00") into a plain number. */
 function parseMoneyCell_(v) {
   if (typeof v === "number") return v;
   if (v === null || v === undefined || v === "") return NaN;
-  var cleaned = String(v).replace(/[^0-9.\-]/g, "");
-  return cleaned ? Number(cleaned) : NaN;
+  var s = String(v).trim();
+  var negParen = /^\(.*\)$/.test(s);
+  var cleaned = s.replace(/[^0-9.\-]/g, "");
+  if (!cleaned) return NaN;
+  var n = Number(cleaned);
+  if (isNaN(n)) return NaN;
+  return negParen ? -Math.abs(n) : n;
+}
+
+/* Looks up a figure on the Finance sheet by label (see
+ * findLabeledNumber_). Returns null if the Finance sheet or the label
+ * isn't found, so callers can fall back to a ledger computation. */
+function getFinanceValue_(ss, labels) {
+  var fin = ss.getSheetByName("Finance");
+  if (!fin) return null;
+  return findLabeledNumber_(fin, labels);
+}
+
+/* Account balance for one of the "ACCOUNT BALANCES" boxes (NBE/Insta,
+ * HSBC, Cash, VF, Telda, Visa), read straight from the Finance sheet
+ * instead of the bottom-up Cash-ledger sum. These are running totals
+ * "as of now", so this override applies no matter which month the app
+ * is currently browsing. Falls back to the ledger sum (already computed
+ * in computeAccountBalances_) if the label can't be found. */
+function getAccountBalanceOverride_(ss, labels) {
+  return getFinanceValue_(ss, labels);
 }
 
 // ============================================================
@@ -299,28 +317,29 @@ function computeSpentToday_(ss) {
   return spent;
 }
 
-/* Average monthly spend from the Avg sheet's Q3:Q11 block (a
+/* Average monthly spend. Prefers the Finance sheet's "AVG MONTHLY
+ * SPEND" box; falls back to summing the Avg sheet's Q3:Q11 block (a
  * hand-built summary column, not a header-based table, so it can't be
- * header-detected the way Cash/Dollar are). Falls back to the Finance
- * sheet's "AVG MONTHLY SPEND" label if the Avg sheet is missing. */
+ * header-detected the way Cash/Dollar are). */
 function computeAvgSpend_(ss) {
+  var v = getFinanceValue_(ss, ["avg monthly spend", "average monthly spending"]);
+  if (v !== null) return Math.abs(v);
+
   var a = ss.getSheetByName("Avg");
   if (a) {
     try {
       var vals = a.getRange("Q3:Q11").getValues();
       var total = 0;
       vals.forEach(function(r) {
-        var v = Math.abs(Number(r[0]) || 0);
-        if (v > 0) total += v;
+        var vv = Math.abs(Number(r[0]) || 0);
+        if (vv > 0) total += vv;
       });
       if (total > 0) return total;
     } catch (e) {
       Logger.log("computeAvgSpend_: Avg!Q3:Q11 read failed: " + e);
     }
   }
-  var fin = ss.getSheetByName("Finance");
-  var v2 = findLabeledValue_(fin, ["avg monthly spend", "average monthly spending"]);
-  return Math.abs(Number(v2) || 0);
+  return 0;
 }
 
 /* Per-main-category breakdown with detail sub-items, same skip/income
@@ -390,48 +409,45 @@ function computeDollarHoldings_(ss) {
   return total;
 }
 
-/* EGP-per-USD rate. No hardcoded fallback number — a stale hardcoded
- * rate is exactly the kind of "hardcoded financial value" this project
- * was full of. If the sheet doesn't expose one, we return 0 and log it
- * rather than guess. */
+/* EGP-per-USD rate. Prefers the Finance sheet's "ACCOUNT BALANCES ▸
+ * DOLLAR HOLDINGS" box, where the rate sits directly under the "USDT"
+ * unit tag (no dedicated text label exists for it in that box, so we
+ * search for "USDT" itself). No hardcoded fallback number — a stale
+ * hardcoded rate is exactly the kind of "hardcoded financial value"
+ * this project was full of. Falls back to the Net worth sheet, then to
+ * 0 (logged) rather than guessing. */
 function getDollarPrice_(ss) {
-  var fin = ss.getSheetByName("Finance");
-  var v = findLabeledValue_(fin, ["dollar price", "dollar"]);
-  if (v && Number(v) > 0) return Number(v);
+  var v = getFinanceValue_(ss, ["usdt", "dollar price", "dollar"]);
+  if (v !== null && v > 0) return v;
   var nw = ss.getSheetByName("Net worth");
-  var v2 = findLabeledValue_(nw, ["dollar price", "live dollar", "live dollar price"]);
-  if (v2 && Number(v2) > 0) return Number(v2);
+  var v2 = findLabeledNumber_(nw, ["dollar price", "live dollar", "live dollar price"]);
+  if (v2 !== null && v2 > 0) return v2;
   Logger.log("getDollarPrice_: no dollar price found on Finance or Net worth sheets");
   return 0;
 }
 
-/* Net worth + assets. Prefers the "Net worth" sheet's labeled rows
- * (existing convention: "Total Wealth" / "Assets"); falls back to the
- * Finance sheet's own "NET WORTH" / "Assets Value" cells. */
+/* Net worth + assets. Prefers the Finance sheet's "NET WORTH" / "Assets"
+ * boxes (validated against the user's Finance-tab export); falls back
+ * to the "Net worth" sheet's labeled rows ("Total Wealth" / "Assets"). */
 function computeNetWorthAssets_(ss) {
-  var netWorth = 0, assetsVal = 0;
-  var nw = ss.getSheetByName("Net worth");
-  if (nw) {
-    var lr = nw.getLastRow();
-    if (lr > 0) {
-      var vals = nw.getRange(1, 1, lr, 2).getValues();
-      vals.forEach(function(r) {
-        var label = String(r[0] || "").trim().toLowerCase();
-        if (label === "total wealth") netWorth = Number(r[1]) || 0;
-        if (label === "assets")       assetsVal = Number(r[1]) || 0;
-      });
+  var netWorth = getFinanceValue_(ss, ["net worth"]);
+  var assetsVal = getFinanceValue_(ss, ["assets", "assets value", "assets:"]);
+
+  if (netWorth === null || assetsVal === null) {
+    var nw = ss.getSheetByName("Net worth");
+    if (nw) {
+      var lr = nw.getLastRow();
+      if (lr > 0) {
+        var vals = nw.getRange(1, 1, lr, 2).getValues();
+        vals.forEach(function(r) {
+          var label = String(r[0] || "").trim().toLowerCase();
+          if (netWorth === null && label === "total wealth") netWorth = Number(r[1]) || 0;
+          if (assetsVal === null && label === "assets")       assetsVal = Number(r[1]) || 0;
+        });
+      }
     }
   }
-  if (!netWorth) {
-    var fin = ss.getSheetByName("Finance");
-    var v = findLabeledValue_(fin, ["net worth"]);
-    if (v) netWorth = Number(v) || 0;
-    if (!assetsVal) {
-      var v2 = findLabeledValue_(fin, ["assets value", "assets"]);
-      if (v2) assetsVal = Number(v2) || 0;
-    }
-  }
-  return { netWorth:netWorth, assetsVal:assetsVal };
+  return { netWorth: netWorth || 0, assetsVal: assetsVal || 0 };
 }
 
 /* Net loans/debt figure. Prefers the Finance sheet's "Loans/Debt"
@@ -439,9 +455,8 @@ function computeNetWorthAssets_(ss) {
  * (EGP column) if the Finance sheet doesn't have it. Negative = money
  * owed TO Kiwan; positive = Kiwan owes it. */
 function computeLoansTotal_(ss) {
-  var fin = ss.getSheetByName("Finance");
-  var v = findLabeledValue_(fin, ["loans/debt", "loans / debt", "loans"]);
-  if (v !== null && v !== "") return Number(v) || 0;
+  var v = getFinanceValue_(ss, ["loans/debt", "loans / debt", "loans"]);
+  if (v !== null) return v;
 
   var loanSh = ss.getSheetByName("Loans");
   if (!loanSh) return 0;
@@ -520,19 +535,47 @@ function handleGet_(e, cb) {
       thisMonth = Utilities.formatDate(new Date(), tz, "MMMM");
     }
 
+    // Account balances: bottom-up ledger sum first, then override with
+    // the Finance sheet's own "ACCOUNT BALANCES" boxes where available
+    // (these are running totals "as of now", so this applies regardless
+    // of which month is being browsed).
     var balances = computeAccountBalances_(ss);
-    var instaOverride = getInstaBalanceOverride_(ss);
-    if (instaOverride !== null) {
-      Logger.log("handleGet_: overriding Insta balance with Finance-sheet value " +
-        instaOverride + " (ledger sum was " + (balances["Insta"] || 0) + ")");
-      balances["Insta"] = instaOverride;
+    Object.keys(ACCOUNT_FINANCE_LABELS).forEach(function(key) {
+      var override = getAccountBalanceOverride_(ss, ACCOUNT_FINANCE_LABELS[key]);
+      if (override !== null) {
+        Logger.log("handleGet_: overriding " + key + " balance with Finance-sheet value " +
+          override + " (ledger sum was " + (balances[key] || 0) + ")");
+        balances[key] = override;
+      }
+    });
+
+    var totals    = computeMonthTotals_(ss, thisMonth);
+    var breakdown = computeMonthBreakdown_(ss, thisMonth);
+    var avgSpend  = computeAvgSpend_(ss);
+    var allMonths = getAvailableMonths_(ss);
+
+    // The Finance sheet's "THIS MONTH" box (Income This Month / Total
+    // Expenses / Saved) only describes the live current month, so it
+    // only overrides the ledger totals when that's the month being
+    // shown — browsing to a past month always uses the ledger sum for
+    // that month instead.
+    var realCurrentMonth = Utilities.formatDate(new Date(), tz, "MMMM");
+    if (thisMonth.toLowerCase() === realCurrentMonth.toLowerCase()) {
+      var incomeOverride  = getFinanceValue_(ss, ["income this month"]);
+      var expenseOverride = getFinanceValue_(ss, ["total expenses"]);
+      var savedOverride   = getFinanceValue_(ss, ["saved / (spent)", "saved/(spent)", "saved"]);
+      if (incomeOverride !== null || expenseOverride !== null || savedOverride !== null) {
+        Logger.log("handleGet_: overriding this-month totals with Finance-sheet values " +
+          "(income=" + incomeOverride + " expense=" + expenseOverride + " saved=" + savedOverride +
+          "), ledger computed income=" + totals.income + " expense=" + totals.expense);
+      }
+      if (incomeOverride  !== null) totals.income  = incomeOverride;
+      if (expenseOverride !== null) totals.expense = expenseOverride;
+      totals.saved = (savedOverride !== null) ? savedOverride : (totals.income - totals.expense);
     }
 
-    var totals         = computeMonthTotals_(ss, thisMonth);
-    var breakdown      = computeMonthBreakdown_(ss, thisMonth);
-    var avgSpend       = computeAvgSpend_(ss);
-    var allMonths      = getAvailableMonths_(ss);
-    var dollarHoldings = computeDollarHoldings_(ss);
+    var dollarHoldingsOverride = getFinanceValue_(ss, ["dollar holdings"]);
+    var dollarHoldings = (dollarHoldingsOverride !== null) ? dollarHoldingsOverride : computeDollarHoldings_(ss);
     var dollarPrice    = getDollarPrice_(ss);
     var netWorthAssets = computeNetWorthAssets_(ss);
     var loans          = computeLoansTotal_(ss);
@@ -540,11 +583,10 @@ function handleGet_(e, cb) {
     var accountsSum = 0;
     Object.keys(balances).forEach(function(k) { accountsSum += balances[k]; });
 
-    var fin = ss.getSheetByName("Finance");
-    var availBalRaw = findLabeledValue_(fin, ["available balance"]);
-    var availableBalance = (availBalRaw !== null && availBalRaw !== "")
-      ? Number(availBalRaw) || 0
-      : (accountsSum + dollarHoldings * dollarPrice);
+    var availableBalance = getFinanceValue_(ss, ["available balance"]);
+    if (availableBalance === null) {
+      availableBalance = accountsSum + dollarHoldings * dollarPrice;
+    }
 
     Logger.log("doGet default: month=" + thisMonth +
       " income=" + totals.income + " expense=" + totals.expense +
@@ -1331,16 +1373,37 @@ function testWealthSummary() {
   }, null, 2));
 }
 
-function testInstaOverrideAndMonthSync() {
+function testFinanceOverrides() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ledgerInsta = (computeAccountBalances_(ss)["Insta"] || 0);
-  var override = getInstaBalanceOverride_(ss);
+  var tz = ss.getSpreadsheetTimeZone();
+  var thisMonth = Utilities.formatDate(new Date(), tz, "MMMM");
+
+  var ledgerBalances = computeAccountBalances_(ss);
+  var accountOverrides = {};
+  Object.keys(ACCOUNT_FINANCE_LABELS).forEach(function(key) {
+    accountOverrides[key] = {
+      ledger:   ledgerBalances[key] || 0,
+      override: getAccountBalanceOverride_(ss, ACCOUNT_FINANCE_LABELS[key])
+    };
+  });
+
   var dashSh = ss.getSheetByName("Dashboard");
   var dashMonth = dashSh ? String(dashSh.getRange("A7").getValue() || "").trim() : "(no Dashboard sheet)";
+
   Logger.log(JSON.stringify({
-    ledgerInsta:        ledgerInsta,
-    financeAA19Override: override,
-    usedValue:          (override !== null ? override : ledgerInsta),
-    dashboardA7Month:   dashMonth
+    accountOverrides:  accountOverrides,
+    thisMonthLedger:   computeMonthTotals_(ss, thisMonth),
+    thisMonthOverride: {
+      income:  getFinanceValue_(ss, ["income this month"]),
+      expense: getFinanceValue_(ss, ["total expenses"]),
+      saved:   getFinanceValue_(ss, ["saved / (spent)", "saved/(spent)", "saved"])
+    },
+    availableBalanceOverride: getFinanceValue_(ss, ["available balance"]),
+    dollarHoldingsOverride:   getFinanceValue_(ss, ["dollar holdings"]),
+    dollarPrice:              getDollarPrice_(ss),
+    netWorthAssets:           computeNetWorthAssets_(ss),
+    loans:                    computeLoansTotal_(ss),
+    avgSpend:                 computeAvgSpend_(ss),
+    dashboardA7Month:         dashMonth
   }, null, 2));
 }
