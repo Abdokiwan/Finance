@@ -387,19 +387,14 @@ function computeMonthBreakdown_(ss, thisMonth) {
   return { income:income, expense:expense };
 }
 
+/* Always all 12 calendar months, in order — not just the ones with
+ * Cash-sheet entries so far. The month picker should let the user
+ * browse ahead/behind regardless of whether that month has ledger data
+ * yet (the Avg-sheet breakdown and ledger computations both handle an
+ * empty month gracefully, showing "No data" rather than erroring). */
 function getAvailableMonths_(ss) {
-  var sh = ss.getSheetByName("Cash");
-  if (!sh) return [];
-  var col = getCashColMap_(sh);
-  var lr = sh.getLastRow();
-  if (lr < 3) return [];
-  var vals = sh.getRange(3, 1, lr - 2, col.month).getValues();
-  var seen = {}, months = [];
-  vals.forEach(function(r) {
-    var m = String(r[col.month - 1] || "").trim();
-    if (m && !seen[m]) { seen[m] = true; months.push(m); }
-  });
-  return months;
+  return ["January","February","March","April","May","June","July",
+          "August","September","October","November","December"];
 }
 
 /* Sum of the Dollar sheet's "spent" column = current dollar holdings. */
