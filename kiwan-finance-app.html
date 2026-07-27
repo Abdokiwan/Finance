@@ -903,6 +903,18 @@
       <div class="balcard"><div class="balname">Cash</div><div class="balval" id="b-cash">—</div></div>
       <div class="balcard"><div class="balname">VF</div><div class="balval" id="b-vf">—</div></div>
       <div class="balcard"><div class="balname">Telda</div><div class="balval" id="b-visamisr">—</div></div>
+      <div class="balcard"><div class="balname">QNB</div><div class="balval" id="b-qnb">—</div></div>
+      <div class="balcard"><div class="balname">Visa</div><div class="balval" id="b-visa">—</div></div>
+    </div>
+
+    <!-- WEALTH SUMMARY (Available Balance / Net Worth / Loans) -->
+    <div class="bal-head">
+      <h4>Wealth summary</h4>
+    </div>
+    <div class="balgrid" id="wealthgrid">
+      <div class="balcard"><div class="balname">Available Balance</div><div class="balval" id="b-availbal">—</div></div>
+      <div class="balcard"><div class="balname">Net Worth</div><div class="balval" id="b-networth">—</div></div>
+      <div class="balcard"><div class="balname">Loans / Debt</div><div class="balval" id="b-loans">—</div></div>
     </div>
 
     <div class="action-row">
@@ -1041,6 +1053,11 @@
 <script>
 /* ============ CONFIG ============ */
 // ⚙️ PASTE your Apps Script Web App URL here after deploying (Step 2):
+// IMPORTANT: Code.gs was consolidated (duplicate doGet/doPost removed) —
+// after deploying a NEW VERSION of the Apps Script project (Deploy ▸
+// Manage deployments ▸ Edit ▸ new version), the /exec URL below is
+// normally unchanged UNLESS you create a brand new deployment. If you
+// create a new deployment instead of a new version, update this URL.
 const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyiyEZR1CA8mZa37zSF4cEbjDt2yEprkXmmuWVhiNitISn7pRoekIqe8Pu41nox8vjDIg/exec";
 
 // All account names that appear in the Cash sheet's Account column
@@ -1080,7 +1097,8 @@ function loadBalances(month){
   selectedMonth = month || selectedMonth;
   var btn = document.getElementById('balrefresh');
   if(btn) btn.classList.add('spin');
-  ['b-insta','b-hsbc','b-cash','b-vf','b-visamisr'].forEach(function(id){
+  ['b-insta','b-hsbc','b-cash','b-vf','b-visamisr','b-qnb','b-visa',
+   'b-availbal','b-networth','b-loans'].forEach(function(id){
     var el=document.getElementById(id);
     if(el){ el.textContent="…"; el.className="balval loading"; }
   });
@@ -1097,7 +1115,8 @@ function loadBalances(month){
   s.src = url;
   s.onerror = function(){
     if(btn) btn.classList.remove('spin');
-    ['b-insta','b-hsbc','b-cash','b-vf','b-visamisr'].forEach(function(id){
+    ['b-insta','b-hsbc','b-cash','b-vf','b-visamisr','b-qnb','b-visa',
+     'b-availbal','b-networth','b-loans'].forEach(function(id){
       var el=document.getElementById(id); if(el){ el.textContent="—"; el.className="balval"; }
     });
     toast("⚠️ Couldn't load balances. Pull to refresh.");
@@ -1115,6 +1134,13 @@ function showBalances(d){
   setBal('b-cash',     d.cash);
   setBal('b-vf',       d.vf);
   setBal('b-visamisr', d.visamisr);
+  setBal('b-qnb',      d.qnb);
+  setBal('b-visa',     d.visa);
+
+  // Wealth summary
+  setBal('b-availbal',  d.available_balance);
+  setBal('b-networth',  d.net_worth);
+  setBal('b-loans',     d.loans);
 
   // Month selector chips — fall back to all 12 if GAS hasn't returned available_months yet
   var _months = (d.available_months && d.available_months.length)
